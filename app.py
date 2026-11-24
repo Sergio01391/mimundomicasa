@@ -191,6 +191,10 @@ def init_connection():
     return create_client(SUPABASE_URL, SUPABASE_KEY)  # Conecta con URL y clave pública de Supabase
 
 
+# Cliente global de Supabase disponible para todas las funciones de datos e interfaz
+supabase = init_connection()
+
+
 def inicializar_estado_sesion():
     """
     Cabecera:
