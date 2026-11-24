@@ -141,10 +141,6 @@ def extraer_colores_mencionados(texto_mayus):
     - Retorna: list[str] con los nombres de color encontrados en orden de aparición.
     """
     encontrados = []
-    # Revisa cada segmento separado por '/', espacios, 'CON', 'Y' o '-'
-    tokens = []
-    for sep in ["/", "-", ",", " CON ", " Y ", " EN ", " "]:
-        pass
     limpio = texto_mayus.replace("/", " ").replace("-", " ").replace(",", " ")
     for palabra in limpio.split():
         p_norm = CORRECCIONES_ORTOGRAFIA.get(palabra, palabra)
@@ -171,7 +167,6 @@ def normalizar_texto(texto, default="GENERAL"):
     if any(k in limpio for k in ["PUNTO", "PUNTOS", "TOPO", "TOPOS"]):
         cols = extraer_colores_mencionados(limpio)
         if len(cols) >= 2:
-            # Si dice "PUNTOS ROJOS EN BLANCO", el segundo color suele ser el fondo y el primero el punto
             if limpio.startswith(("PUNTO", "PUNTOS", "TOPO", "TOPOS")) and " EN " in limpio:
                 return f"{cols[1]} PUNTOS {cols[0]}"
             return f"{cols[0]} PUNTOS {cols[1]}"
@@ -564,6 +559,15 @@ def configurar_pagina_y_estilos():
             background: #e3f2fd;
             animation: parpadeo-color 0.9s infinite;
         }
+        .color-seleccionado-resumen {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 800;
+            color: #1565c0;
+            margin-bottom: 6px;
+        }
         .kiosco-header {
             background: linear-gradient(90deg, #1565c0 0%, #1976d2 100%);
             color: white;
@@ -659,8 +663,8 @@ def render_catalogo(productos):
     """
     Cabecera:
     Renderiza el catálogo público mostrando únicamente productos con stock >= 1 y
-    precio > 0. Permite elegir un color simple, bicolor, a rayas o con puntos
-    haciendo clic sobre él (haciéndolo parpadear al quedar seleccionado) y agregarlo al carrito.
+    precio > 0. Permite elegir un color haciendo clic sobre él (haciéndolo parpadear),
+    muestra únicamente el color seleccionado y permite agregarlo al carrito.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
@@ -853,7 +857,7 @@ def render_catalogo(productos):
                             unsafe_allow_html=True
                         )
 
-                    st.caption("HAZ CLIC EN UN COLOR (SIMPLE, BICOLOR, RAYAS O PUNTOS):")
+                    st.caption("SELECCIONA EL COLOR:")
 
                     if not colores_disp:
                         colores_disp = [("ÚNICO", stock_total)]
@@ -866,9 +870,14 @@ def render_catalogo(productos):
                     color_actual = st.session_state[key_color_sel]
                     stock_color_actual = dict(colores_disp).get(color_actual, 0)
 
-                    # Aviso específico si el color seleccionado tiene stock menor o igual al umbral
-                    if stock_color_actual <= UMBRAL_STOCK_BAJO:
-                        st.caption(f"⚠️ QUEDAN POCAS UNIDADES EN {color_actual} ({stock_color_actual} DISP.).")
+                    # Muestra únicamente el color seleccionado con su muestra visual
+                    st.markdown(
+                        f"<div class='color-seleccionado-resumen'>"
+                        f"{render_muestra_color_html(color_actual)}"
+                        f"<span>COLOR SELECCIONADO: {color_actual}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
 
                     # Muestra cada color con su muestra visual parpadeante al elegirse
                     cols_colores = st.columns(min(len(colores_disp), 2))
@@ -876,7 +885,6 @@ def render_catalogo(productos):
                         es_sel = (nom_c == color_actual)
                         muestra_html = render_muestra_color_html(nom_c)
                         clase_chip = "color-chip-elegido" if es_sel else "color-chip"
-                        etiqueta_estado = "ELEGIDO (PARPADEANDO)" if es_sel else "CLIC PARA ELEGIR"
                         with cols_colores[idx_c % len(cols_colores)]:
                             st.markdown(
                                 f"<div class='{clase_chip}'>"
@@ -888,7 +896,6 @@ def render_catalogo(productos):
                             if st.button(
                                 f"✨ {nom_c}" if es_sel else f"{nom_c}",
                                 key=f"btn_c_{prod['id']}_{nom_c}",
-                                help=etiqueta_estado,
                                 use_container_width=True
                             ):
                                 st.session_state[key_color_sel] = nom_c  # Marca este color como elegido y parpadeante
