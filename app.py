@@ -48,7 +48,7 @@ TIPOS_PRODUCTO_BASE = [
     "ALMOHADONES NAVIDEÑOS",
 ]
 
-# Diccionario para corregir ortografía común y unificar nombres en mayúsculas
+# Diccionario para corregir ortografía, abreviaturas y unificar nombres en mayúsculas
 CORRECCIONES_ORTOGRAFIA = {
     "COQUET EN TELA": "COQUET EN TELA",
     "COQUET EN CINTA": "COQUET EN CINTA",
@@ -66,10 +66,28 @@ CORRECCIONES_ORTOGRAFIA = {
     "ESTÁNDAR": "ESTÁNDAR",
     "UNICO": "ÚNICO",
     "ÚNICO": "ÚNICO",
+    "ROJ": "ROJO",
+    "AZU": "AZUL",
+    "CEL": "CELESTE",
+    "ROS": "ROSADO",
+    "ROSA": "ROSADO",
+    "FUC": "FUCSIA",
+    "NEG": "NEGRO",
+    "BLA": "BLANCO",
+    "VER": "VERDE",
+    "AMA": "AMARILLO",
+    "MOR": "MORADO",
+    "NAR": "NARANJA",
     "CAFE": "CAFÉ",
     "CAFÉ": "CAFÉ",
     "MARRON": "MARRÓN",
     "MARRÓN": "MARRÓN",
+    "MAR": "MARRÓN",
+    "DOR": "DORADO",
+    "PLA": "PLATEADO",
+    "GRI": "GRIS",
+    "BEI": "BEIGE",
+    "CRE": "CREMA",
 }
 
 # Colores visuales (HEX) para mostrar muestras junto a los botones de color
@@ -113,11 +131,33 @@ def ahora_bolivia():
     return datetime.now(ZONA_BOLIVIA)  # Devuelve el instante actual en hora local de Bolivia
 
 
+def extraer_colores_mencionados(texto_mayus):
+    """
+    Cabecera:
+    Identifica en orden los colores conocidos mencionados dentro de un texto
+    en mayúsculas (útil para diseños bicolor, a rayas o con puntos).
+    - Parámetros:
+        texto_mayus (str): cadena ya normalizada en mayúsculas.
+    - Retorna: list[str] con los nombres de color encontrados en orden de aparición.
+    """
+    encontrados = []
+    # Revisa cada segmento separado por '/', espacios, 'CON', 'Y' o '-'
+    tokens = []
+    for sep in ["/", "-", ",", " CON ", " Y ", " EN ", " "]:
+        pass
+    limpio = texto_mayus.replace("/", " ").replace("-", " ").replace(",", " ")
+    for palabra in limpio.split():
+        p_norm = CORRECCIONES_ORTOGRAFIA.get(palabra, palabra)
+        if p_norm in MAPA_COLORES_CSS and p_norm not in encontrados:
+            encontrados.append(p_norm)  # Conserva el primer color (base) y el segundo (detalle/raya/punto)
+    return encontrados
+
+
 def normalizar_texto(texto, default="GENERAL"):
     """
     Cabecera:
     Limpia espacios sobrantes, convierte un texto a MAYÚSCULAS y aplica correcciones
-    ortográficas predefinidas para mantener consistencia en el catálogo.
+    ortográficas, abreviaturas, combinaciones bicolor ('/'), rayas y puntos.
     - Parámetros:
         texto (str | None): texto de entrada a normalizar.
         default (str): valor en mayúsculas si el texto está vacío.
@@ -126,13 +166,40 @@ def normalizar_texto(texto, default="GENERAL"):
     limpio = " ".join(str(texto or "").strip().split()).upper()  # Quita espacios extra y pasa a mayúsculas
     if not limpio:
         return default.upper()  # Usa el valor por defecto si quedó vacío
+
+    # Detecta si el texto describe un diseño con puntos (ej. BLANCO CON PUNTOS ROJOS, PUNTOS ROJOS EN BLANCO)
+    if any(k in limpio for k in ["PUNTO", "PUNTOS", "TOPO", "TOPOS"]):
+        cols = extraer_colores_mencionados(limpio)
+        if len(cols) >= 2:
+            # Si dice "PUNTOS ROJOS EN BLANCO", el segundo color suele ser el fondo y el primero el punto
+            if limpio.startswith(("PUNTO", "PUNTOS", "TOPO", "TOPOS")) and " EN " in limpio:
+                return f"{cols[1]} PUNTOS {cols[0]}"
+            return f"{cols[0]} PUNTOS {cols[1]}"
+        return limpio
+
+    # Detecta si el texto describe un diseño a rayas (ej. RAYAS BLANCO/ROJO, BLANCO A RAYAS ROJAS)
+    if any(k in limpio for k in ["RAYA", "RAYAS", "RAYADO", "RAYADA"]):
+        cols = extraer_colores_mencionados(limpio)
+        if len(cols) >= 2:
+            return f"RAYAS {cols[0]}/{cols[1]}"
+        return limpio
+
+    # Si contiene '/', normaliza cada parte del color bicolor (ej. ROJ/AZUL -> ROJO/AZUL)
+    if "/" in limpio:
+        partes_bicolor = []
+        for seg in limpio.split("/"):
+            seg_limpio = " ".join(seg.strip().split()).upper()
+            if seg_limpio:
+                partes_bicolor.append(CORRECCIONES_ORTOGRAFIA.get(seg_limpio, seg_limpio))
+        return "/".join(partes_bicolor) if partes_bicolor else default.upper()
+
     return CORRECCIONES_ORTOGRAFIA.get(limpio, limpio)  # Aplica corrección ortográfica si existe
 
 
 def parsear_colores_stock(texto_colores):
     """
     Cabecera:
-    Convierte una cadena de texto con formato 'COLOR:CANTIDAD, COLOR2:CANTIDAD2'
+    Convierte una cadena de texto con formato 'COLOR:CANTIDAD, COLOR2/COLOR3:CANTIDAD2'
     en una lista de tuplas [(COLOR_MAYUS, STOCK_ENTERO), ...].
     - Parámetros:
         texto_colores (str | None): cadena con colores y cantidades separadas por coma.
@@ -147,7 +214,7 @@ def parsear_colores_stock(texto_colores):
             continue  # Omite segmentos vacíos por comas dobles o finales
         if ":" in parte:
             nombre_c, cant_s = parte.split(":", 1)  # Separa nombre del color y cantidad
-            nombre_c = normalizar_texto(nombre_c, "ÚNICO")  # Normaliza ortografía y mayúsculas del color
+            nombre_c = normalizar_texto(nombre_c, "ÚNICO")  # Normaliza ortografía, bicolor, rayas y puntos
             try:
                 cant_i = max(0, int(float(cant_s.strip())))  # Convierte stock a entero no negativo
             except ValueError:
@@ -202,6 +269,57 @@ def color_hex(nombre_color):
         if k in clave:
             return v  # Devuelve el primer color coincidente del diccionario
     return "#546e7a"  # Color gris azulado neutro por defecto
+
+
+def render_muestra_color_html(nombre_color):
+    """
+    Cabecera:
+    Genera el HTML de la muestra visual circular según el estilo:
+    - Con puntos ('PUNTOS'): fondo del primer color con puntitos del segundo color.
+    - A rayas ('RAYAS'): franjas alternadas entre los dos colores.
+    - Bicolor ('/'): mitad izquierda y mitad derecha de cada color.
+    - Color simple: círculo uniforme del color indicado.
+    - Parámetros:
+        nombre_color (str): nombre del color o estampado normalizado.
+    - Retorna: str con código HTML de la muestra circular.
+    """
+    col_norm = normalizar_texto(nombre_color, "ÚNICO")
+    cols = extraer_colores_mencionados(col_norm)
+
+    if any(k in col_norm for k in ["PUNTO", "PUNTOS", "TOPO", "TOPOS"]):
+        base_hex = color_hex(cols[0]) if len(cols) >= 1 else "#f5f5f5"
+        punto_hex = color_hex(cols[1]) if len(cols) >= 2 else "#e53935"
+        return (
+            f"<span style='display:inline-block;width:16px;height:16px;border-radius:50%;"
+            f"background-color:{base_hex};"
+            f"background-image:radial-gradient({punto_hex} 2px, transparent 2.2px),radial-gradient({punto_hex} 2px, transparent 2.2px);"
+            f"background-size:8px 8px;background-position:0 0,4px 4px;"
+            f"border:1px solid #777;flex-shrink:0;'></span>"
+        )  # Círculo con puntos del segundo color sobre el color base
+
+    if any(k in col_norm for k in ["RAYA", "RAYAS", "RAYADO", "RAYADA"]):
+        c1 = color_hex(cols[0]) if len(cols) >= 1 else "#f5f5f5"
+        c2 = color_hex(cols[1]) if len(cols) >= 2 else "#e53935"
+        return (
+            f"<span style='display:inline-block;width:16px;height:16px;border-radius:50%;"
+            f"background:repeating-linear-gradient(90deg, {c1} 0px, {c1} 4px, {c2} 4px, {c2} 8px);"
+            f"border:1px solid #777;flex-shrink:0;'></span>"
+        )  # Círculo a rayas alternadas
+
+    if "/" in col_norm:
+        partes = [p.strip() for p in col_norm.split("/") if p.strip()]
+        c1 = color_hex(partes[0]) if len(partes) >= 1 else "#546e7a"
+        c2 = color_hex(partes[1]) if len(partes) >= 2 else c1
+        return (
+            f"<span style='display:inline-block;width:16px;height:16px;border-radius:50%;"
+            f"background:linear-gradient(90deg, {c1} 50%, {c2} 50%);border:1px solid #777;flex-shrink:0;'></span>"
+        )  # Círculo bicolor dividido en dos mitades
+
+    c_unico = color_hex(col_norm)
+    return (
+        f"<span style='display:inline-block;width:16px;height:16px;border-radius:50%;"
+        f"background:{c_unico};border:1px solid #777;flex-shrink:0;'></span>"
+    )  # Círculo de un solo color
 
 
 @st.cache_resource
@@ -395,8 +513,8 @@ def configurar_pagina_y_estilos():
     """
     Cabecera:
     Configura los parámetros generales de la página en Streamlit e inyecta
-    los estilos CSS personalizados para el catálogo, tarjetas de color, stock bajo,
-    aviso de envío y botón de WhatsApp.
+    los estilos CSS personalizados para el catálogo, parpadeo de color elegido,
+    muestras bicolor/rayas/puntos, stock bajo, aviso de envío y botón de WhatsApp.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -412,6 +530,39 @@ def configurar_pagina_y_estilos():
         [data-testid="stSidebar"],
         [data-testid="collapsedControl"] {
             display: none !important;
+        }
+        @keyframes parpadeo-color {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 0 2px #1565c0, 0 0 10px rgba(21, 101, 192, 0.55);
+            }
+            50% {
+                opacity: 0.45;
+                transform: scale(0.98);
+                box-shadow: 0 0 0 3px #1976d2, 0 0 14px rgba(25, 118, 210, 0.75);
+            }
+        }
+        .color-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            margin-bottom: 4px;
+            background: #ffffff;
+        }
+        .color-chip-elegido {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            border: 2px solid #1565c0;
+            border-radius: 7px;
+            margin-bottom: 4px;
+            background: #e3f2fd;
+            animation: parpadeo-color 0.9s infinite;
         }
         .kiosco-header {
             background: linear-gradient(90deg, #1565c0 0%, #1976d2 100%);
@@ -508,9 +659,8 @@ def render_catalogo(productos):
     """
     Cabecera:
     Renderiza el catálogo público mostrando únicamente productos con stock >= 1 y
-    precio > 0 (si el stock es menor a 1 o igual a 0, no se muestran). Incluye buscador,
-    filtros por línea, mosaicos por tipo de producto, filtro rápido de COQUET EN TELA
-    y COQUET EN CINTA, avisos de stock bajo y tarjetas con botones de color.
+    precio > 0. Permite elegir un color simple, bicolor, a rayas o con puntos
+    haciendo clic sobre él (haciéndolo parpadear al quedar seleccionado) y agregarlo al carrito.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
@@ -526,8 +676,8 @@ def render_catalogo(productos):
         return  # Sale temprano si no hay productos con stock >= 1
 
     busqueda = st.text_input(
-        "🔍 BUSCAR POR TIPO, MODELO O COLOR",
-        placeholder="EJ. COQUET EN TELA, COQUET EN CINTA, COLA REDONDA, COLA LARGA, DELGADA, GRUESA..."
+        "🔍 BUSCAR POR TIPO, MODELO, COLOR O ESTAMPADO",
+        placeholder="EJ. COQUET EN TELA, ROJO/AZUL, BLANCO PUNTOS ROJOS, RAYAS BLANCO/ROJO..."
     )  # Barra de búsqueda en tiempo real
 
     # Extrae las líneas únicas preservando el orden de aparición
@@ -703,7 +853,7 @@ def render_catalogo(productos):
                             unsafe_allow_html=True
                         )
 
-                    st.caption("COLORES DISPONIBLES EN STOCK:")
+                    st.caption("HAZ CLIC EN UN COLOR (SIMPLE, BICOLOR, RAYAS O PUNTOS):")
 
                     if not colores_disp:
                         colores_disp = [("ÚNICO", stock_total)]
@@ -720,26 +870,28 @@ def render_catalogo(productos):
                     if stock_color_actual <= UMBRAL_STOCK_BAJO:
                         st.caption(f"⚠️ QUEDAN POCAS UNIDADES EN {color_actual} ({stock_color_actual} DISP.).")
 
-                    # Botones visuales por cada color disponible en stock (>= 1)
-                    cols_colores = st.columns(min(len(colores_disp), 3))
+                    # Muestra cada color con su muestra visual parpadeante al elegirse
+                    cols_colores = st.columns(min(len(colores_disp), 2))
                     for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
-                        hex_c = color_hex(nom_c)
                         es_sel = (nom_c == color_actual)
-                        borde = "3px solid #1565c0" if es_sel else "1px solid #cbd5e1"
+                        muestra_html = render_muestra_color_html(nom_c)
+                        clase_chip = "color-chip-elegido" if es_sel else "color-chip"
+                        etiqueta_estado = "ELEGIDO (PARPADEANDO)" if es_sel else "CLIC PARA ELEGIR"
                         with cols_colores[idx_c % len(cols_colores)]:
                             st.markdown(
-                                f"<div style='display:flex;align-items:center;gap:6px;padding:4px 6px;border:{borde};border-radius:6px;margin-bottom:4px;background:#fff;'>"
-                                f"<span style='display:inline-block;width:14px;height:14px;border-radius:50%;background:{hex_c};border:1px solid #999;'></span>"
-                                f"<span style='font-size:12px;font-weight:700;'>{nom_c} ({stk_c})</span>"
+                                f"<div class='{clase_chip}'>"
+                                f"{muestra_html}"
+                                f"<span style='font-size:12px;font-weight:800;'>{nom_c} ({stk_c})</span>"
                                 f"</div>",
                                 unsafe_allow_html=True
                             )
                             if st.button(
-                                "ELEGIDO ✓" if es_sel else f"{nom_c}",
+                                f"✨ {nom_c}" if es_sel else f"{nom_c}",
                                 key=f"btn_c_{prod['id']}_{nom_c}",
+                                help=etiqueta_estado,
                                 use_container_width=True
                             ):
-                                st.session_state[key_color_sel] = nom_c  # Actualiza color seleccionado
+                                st.session_state[key_color_sel] = nom_c  # Marca este color como elegido y parpadeante
                                 st.rerun()
 
                     en_carrito_color = st.session_state["carrito"].get((prod["id"], color_actual), 0)
@@ -1052,7 +1204,7 @@ def render_subtab_crear_producto():
     Renderiza el formulario para crear un nuevo tipo de producto (mosaico),
     un subtipo/variante opcional (ej. COQUET EN TELA, COQUET EN CINTA) y su
     subproducto/modelo (ej. COLA REDONDA, COLA LARGA, DELGADA, GRUESA) con precio,
-    colores en stock y foto.
+    colores simples, bicolores, a rayas o con puntos en stock y foto.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -1082,7 +1234,10 @@ def render_subtab_crear_producto():
             )
         with c3:
             prec_p = st.number_input("4. PRECIO DE LISTA (BS.) *", min_value=0.0, step=1.0, format="%.2f")
-            col_stk_p = st.text_input("5. COLORES Y STOCK * (EJ. ROJO:4, ROSA:6, AZUL:2)", value="ROJO:5, ROSA:5")
+            col_stk_p = st.text_input(
+                "5. COLORES Y STOCK (BICOLOR, RAYAS, PUNTOS) *",
+                value="ROJO:5, ROJ/AZUL:3, BLANCO PUNTOS ROJOS:2, RAYAS BLANCO/ROJO:4"
+            )
             desc_p = st.text_input("DESCRIPCIÓN CORTA (OPCIONAL)")
 
         foto_p = st.file_uploader("FOTO DEL MODELO (OPCIONAL)", type=["jpg", "jpeg", "png", "webp"])
@@ -1131,13 +1286,13 @@ def render_subtab_lista_precios():
     """
     Cabecera:
     Renderiza la tabla editable para configurar y actualizar en lote los precios de lista,
-    colores en stock, tipos de producto, modelos y visibilidad de cada ítem,
-    resalta ítems con stock menor o igual al umbral, permite agregar/actualizar
+    colores simples, bicolores, a rayas o con puntos en stock, tipos de producto, modelos
+    y visibilidad, resalta ítems con stock menor o igual al umbral, permite agregar/actualizar
     fotografía tras crear el producto y permite eliminar un registro específico.
     - Parámetros: ninguno.
     - Retorna: None.
     """
-    st.write("EDITA DIRECTAMENTE LOS TIPOS DE PRODUCTO, MODELOS, PRECIOS DE LISTA, COLORES EN STOCK O VISIBILIDAD:")
+    st.write("EDITA DIRECTAMENTE LOS TIPOS DE PRODUCTO, MODELOS, PRECIOS DE LISTA, COLORES (EJ. ROJ/AZUL:3, BLANCO PUNTOS ROJOS:2, RAYAS BLANCO/ROJO:4) O VISIBILIDAD:")
     todos_p = cargar_productos(solo_activos=False)
     if not todos_p:
         st.info("NO HAY PRODUCTOS REGISTRADOS TODAVÍA.")
@@ -1177,7 +1332,7 @@ def render_subtab_lista_precios():
                 format="%.2f"
             ),
             "COLORES EN STOCK (COLOR:CANT)": st.column_config.TextColumn(
-                "COLORES EN STOCK (EJ. ROJO:5, AZUL:3)"
+                "COLORES EN STOCK (EJ. ROJ/AZUL:3, BLANCO PUNTOS ROJOS:2)"
             ),
             "ACTIVO": st.column_config.CheckboxColumn("VISIBLE")
         },
