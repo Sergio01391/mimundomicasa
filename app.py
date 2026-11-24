@@ -444,7 +444,8 @@ def render_catalogo(productos):
     Cabecera:
     Renderiza el catálogo público con buscador, filtros por línea/temporada,
     mosaicos por tipo de producto (COQUET, FLOR, POMPÓN, SCRUNCHIES, MARIPOSAS,
-    WINCHAS, PULSERAS, ALMOHADONES NAVIDEÑOS) y vista de modelos con botones de color en stock.
+    WINCHAS, PULSERAS, ALMOHADONES NAVIDEÑOS), filtro interno de COQUET EN TELA
+    y COQUET EN CINTA, y tarjetas de modelos con botones de color en stock.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
@@ -455,7 +456,7 @@ def render_catalogo(productos):
 
     busqueda = st.text_input(
         "🔍 BUSCAR POR TIPO, MODELO O COLOR",
-        placeholder="EJ. COQUET, COLA REDONDA, COLA LARGA, SCRUNCHIES, WINCHAS, ROJO..."
+        placeholder="EJ. COQUET EN TELA, COQUET EN CINTA, COLA REDONDA, COLA LARGA, ROJO..."
     )  # Barra de búsqueda en tiempo real
 
     # Extrae las líneas únicas preservando el orden de aparición
@@ -483,7 +484,7 @@ def render_catalogo(productos):
                 use_container_width=True
             ):
                 st.session_state["linea_activa"] = nombre_l  # Cambia la línea activa
-                st.session_state["tipo_activo"] = None  # Regresa a los mosaicos de tipos de producto
+                st.session_state["tipo_activo"] = None  # Vuelve a los mosaicos de tipos de producto
                 st.rerun()
 
     st.divider()
@@ -521,7 +522,7 @@ def render_catalogo(productos):
                     normalizar_texto(x.get("subproducto") or x.get("nombre"), "")
                     for x in items_tp if (x.get("subproducto") or "").strip()
                 ])
-            )  # Vista previa de modelos dentro del mosaico (ej. COLA REDONDA, COLA LARGA)
+            )  # Vista previa de modelos dentro del mosaico
 
             with cols_mosaico[idx_t % 4]:
                 with st.container(border=True):
@@ -533,15 +534,18 @@ def render_catalogo(productos):
                             unsafe_allow_html=True
                         )  # Placeholder visual si aún no tiene foto
                     st.markdown(f"### {tp_nombre}")
-                    if subproductos_preview:
+                    if tp_nombre == "COQUET":
+                        st.caption("INCLUYE: COQUET EN TELA Y COQUET EN CINTA")  # Destaca ambas líneas dentro de COQUET
+                    elif subproductos_preview:
                         st.caption(f"MODELOS: {subproductos_preview}")
                     st.write(f"**{len(items_tp)}** MODELOS DISPONIBLES")
                     if st.button(f"VER MODELOS →", key=f"open_tipo_{idx_t}", type="primary", use_container_width=True):
-                        st.session_state["tipo_activo"] = tp_nombre  # Abre los subproductos/modelos de este tipo
+                        st.session_state["tipo_activo"] = tp_nombre  # Abre los modelos de este tipo de producto
                         st.rerun()
 
     # Nivel 3: Muestra subproductos/modelos del tipo elegido o resultados de búsqueda
     else:
+        filtro_coquet = "TODOS"
         if tipo_sel is not None:
             col_back, col_tit = st.columns([1.3, 4], vertical_alignment="center")
             with col_back:
@@ -550,6 +554,15 @@ def render_catalogo(productos):
                     st.rerun()
             with col_tit:
                 st.markdown(f"<div class='seccion-banner' style='text-align:left;margin:0;'>{tipo_sel}</div>", unsafe_allow_html=True)
+
+            # Si el usuario entra a COQUET, permite filtrar entre COQUET EN TELA y COQUET EN CINTA
+            if tipo_sel == "COQUET":
+                filtro_coquet = st.radio(
+                    "FILTRAR COQUET POR MATERIAL / ESTILO:",
+                    ["TODOS", "COQUET EN TELA", "COQUET EN CINTA"],
+                    horizontal=True,
+                    key="filtro_estilo_coquet"
+                )  # Selector rápido entre COQUET EN TELA y COQUET EN CINTA
             st.divider()
 
         filtrados = productos_linea
@@ -558,6 +571,14 @@ def render_catalogo(productos):
                 p for p in filtrados
                 if normalizar_texto(p.get("tipo_producto") or p.get("nombre"), "GENERAL") == tipo_sel
             ]
+
+        if tipo_sel == "COQUET" and filtro_coquet != "TODOS":
+            filtrados = [
+                p for p in filtrados
+                if filtro_coquet in normalizar_texto(p.get("subproducto"), "")
+                or filtro_coquet in normalizar_texto(p.get("nombre"), "")
+                or filtro_coquet in normalizar_texto(p.get("descripcion"), "")
+            ]  # Filtra los modelos que corresponden a COQUET EN TELA o COQUET EN CINTA
 
         if busqueda.strip():
             term = normalizar_texto(busqueda, "")
@@ -591,7 +612,7 @@ def render_catalogo(productos):
                     subp = normalizar_texto(prod.get("subproducto") or prod.get("nombre"), "ESTÁNDAR")
                     precio = float(prod.get("precio") or 0)
                     colores_lista = parsear_colores_stock(prod.get("colores_stock"))
-                    colores_disp = [(c, s) for c, s in colores_lista if s > 0]  # Solo colores con stock mayor a 0
+                    colores_disp = [(c, s) for c, s in colores_lista if s > 0]  # Solo colores con stock disponible
                     stock_total = sum(s for _, s in colores_lista)
 
                     st.caption(f"{normalizar_texto(prod.get('categoria'), 'GENERAL')} · {tp_prod}")
@@ -607,7 +628,7 @@ def render_catalogo(productos):
                         key_color_sel = f"color_sel_{prod['id']}"
                         nombres_disp = [c for c, _ in colores_disp]
                         if key_color_sel not in st.session_state or st.session_state[key_color_sel] not in nombres_disp:
-                            st.session_state[key_color_sel] = nombres_disp[0]  # Selecciona por defecto el primer color disponible
+                            st.session_state[key_color_sel] = nombres_disp[0]  # Selecciona el primer color disponible
 
                         color_actual = st.session_state[key_color_sel]
 
@@ -630,7 +651,7 @@ def render_catalogo(productos):
                                     key=f"btn_c_{prod['id']}_{nom_c}",
                                     use_container_width=True
                                 ):
-                                    st.session_state[key_color_sel] = nom_c  # Marca el color elegido
+                                    st.session_state[key_color_sel] = nom_c  # Actualiza color seleccionado
                                     st.rerun()
 
                         stock_color_actual = dict(colores_disp).get(color_actual, 0)
@@ -643,7 +664,7 @@ def render_catalogo(productos):
                             use_container_width=True
                         ):
                             if en_carrito_color < stock_color_actual:
-                                st.session_state["carrito"][(prod["id"], color_actual)] = en_carrito_color + 1  # Suma 1 al carrito
+                                st.session_state["carrito"][(prod["id"], color_actual)] = en_carrito_color + 1  # Agrega unidad al carrito
                                 st.toast(f"✅ AGREGADO: {tp_prod} - {subp} [{color_actual}]")
                                 st.rerun()
                             else:
@@ -651,7 +672,6 @@ def render_catalogo(productos):
                     else:
                         st.markdown("<div class='badge-agotado'>❌ AGOTADO</div>", unsafe_allow_html=True)
                         st.button("SIN STOCK DISPONIBLE", key=f"no_stk_{prod['id']}", disabled=True, use_container_width=True)
-
 
 def render_carrito(productos):
     """
