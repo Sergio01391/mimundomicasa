@@ -90,7 +90,7 @@ CORRECCIONES_ORTOGRAFIA = {
     "CRE": "CREMA",
 }
 
-# Colores visuales (HEX) para mostrar muestras junto a los botones de color
+# Colores visuales (HEX) para mostrar muestras junto a los cuadros de color
 MAPA_COLORES_CSS = {
     "ROJO": "#e53935",
     "AZUL": "#1e88e5",
@@ -508,8 +508,8 @@ def configurar_pagina_y_estilos():
     """
     Cabecera:
     Configura los parámetros generales de la página en Streamlit e inyecta
-    los estilos CSS personalizados para el catálogo, parpadeo de color elegido,
-    muestras bicolor/rayas/puntos, stock bajo, aviso de envío y botón de WhatsApp.
+    los estilos CSS personalizados para que los botones de color sean la selección
+    parpadeante y debajo aparezca un cuadro estático con el color elegido.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -526,47 +526,42 @@ def configurar_pagina_y_estilos():
         [data-testid="collapsedControl"] {
             display: none !important;
         }
-        @keyframes parpadeo-color {
+        @keyframes parpadeo-boton-color {
             0%, 100% {
                 opacity: 1;
                 transform: scale(1);
-                box-shadow: 0 0 0 2px #1565c0, 0 0 10px rgba(21, 101, 192, 0.55);
+                box-shadow: 0 0 0 2px #1565c0, 0 0 12px rgba(21, 101, 192, 0.65);
             }
             50% {
                 opacity: 0.45;
                 transform: scale(0.98);
-                box-shadow: 0 0 0 3px #1976d2, 0 0 14px rgba(25, 118, 210, 0.75);
+                box-shadow: 0 0 0 3px #1976d2, 0 0 16px rgba(25, 118, 210, 0.85);
             }
         }
-        .color-chip {
+        .muestra-encima-btn {
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 6px;
-            padding: 5px 8px;
+            padding: 4px 6px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+        }
+        .cuadro-color-elegido {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
             border: 1px solid #cbd5e1;
-            border-radius: 7px;
-            margin-bottom: 4px;
-            background: #ffffff;
-        }
-        .color-chip-elegido {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 8px;
-            border: 2px solid #1565c0;
-            border-radius: 7px;
-            margin-bottom: 4px;
-            background: #e3f2fd;
-            animation: parpadeo-color 0.9s infinite;
-        }
-        .color-seleccionado-resumen {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
+            border-radius: 8px;
+            background-color: #f8fafc;
+            color: #0f172a;
+            font-size: 13px;
             font-weight: 800;
-            color: #1565c0;
-            margin-bottom: 6px;
+            margin: 6px 0 10px 0;
+            pointer-events: none;
         }
         .kiosco-header {
             background: linear-gradient(90deg, #1565c0 0%, #1976d2 100%);
@@ -663,8 +658,8 @@ def render_catalogo(productos):
     """
     Cabecera:
     Renderiza el catálogo público mostrando únicamente productos con stock >= 1 y
-    precio > 0. Permite elegir un color haciendo clic sobre él (haciéndolo parpadear),
-    muestra únicamente el color seleccionado y permite agregarlo al carrito.
+    precio > 0. Los botones de color son la selección (parpadean al elegirse) y debajo
+    se muestra un cuadro estático que indica el color elegido en texto.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
@@ -870,36 +865,42 @@ def render_catalogo(productos):
                     color_actual = st.session_state[key_color_sel]
                     stock_color_actual = dict(colores_disp).get(color_actual, 0)
 
-                    # Muestra únicamente el color seleccionado con su muestra visual
-                    st.markdown(
-                        f"<div class='color-seleccionado-resumen'>"
-                        f"{render_muestra_color_html(color_actual)}"
-                        f"<span>COLOR SELECCIONADO: {color_actual}</span>"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
-
-                    # Muestra cada color con su muestra visual parpadeante al elegirse
+                    # Los mismos botones de color son la selección y parpadean cuando están elegidos
                     cols_colores = st.columns(min(len(colores_disp), 2))
                     for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
                         es_sel = (nom_c == color_actual)
                         muestra_html = render_muestra_color_html(nom_c)
-                        clase_chip = "color-chip-elegido" if es_sel else "color-chip"
+                        key_btn_col = f"btn_c_{prod['id']}_{nom_c}"
                         with cols_colores[idx_c % len(cols_colores)]:
                             st.markdown(
-                                f"<div class='{clase_chip}'>"
+                                f"<div class='muestra-encima-btn'>"
                                 f"{muestra_html}"
-                                f"<span style='font-size:12px;font-weight:800;'>{nom_c} ({stk_c})</span>"
+                                f"<span style='font-size:11px;font-weight:700;color:#334155;'>({stk_c})</span>"
                                 f"</div>",
                                 unsafe_allow_html=True
                             )
                             if st.button(
-                                f"✨ {nom_c}" if es_sel else f"{nom_c}",
-                                key=f"btn_c_{prod['id']}_{nom_c}",
+                                nom_c,
+                                key=key_btn_col,
+                                type="primary" if es_sel else "secondary",
                                 use_container_width=True
                             ):
-                                st.session_state[key_color_sel] = nom_c  # Marca este color como elegido y parpadeante
+                                st.session_state[key_color_sel] = nom_c  # Actualiza el color elegido
                                 st.rerun()
+                            if es_sel:
+                                st.markdown(
+                                    f"<style>.st-key-{key_btn_col} button {{ animation: parpadeo-boton-color 0.9s infinite !important; }}</style>",
+                                    unsafe_allow_html=True
+                                )  # Hace parpadear directamente el botón de color elegido
+
+                    # Cuadro estático (sin acción al hacer clic) que muestra en texto el color elegido
+                    st.markdown(
+                        f"<div class='cuadro-color-elegido'>"
+                        f"{render_muestra_color_html(color_actual)}"
+                        f"<span>{color_actual}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
 
                     en_carrito_color = st.session_state["carrito"].get((prod["id"], color_actual), 0)
 
