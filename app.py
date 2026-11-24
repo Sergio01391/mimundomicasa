@@ -44,8 +44,8 @@ TIPOS_PRODUCTO_BASE = [
 
 # Diccionario para corregir ortografía común y unificar nombres en mayúsculas
 CORRECCIONES_ORTOGRAFIA = {
-    "COQUET EN TELA": "COQUET",
-    "COQUET EN CINTA": "COQUET",
+    "COQUET EN TELA": "COQUET EN TELA",
+    "COQUET EN CINTA": "COQUET EN CINTA",
     "FLOR GOGO": "FLOR",
     "POMPON": "POMPÓN",
     "POMPÓN EN CINTA": "POMPÓN",
@@ -266,6 +266,18 @@ def subir_imagen_storage(archivo_subido):
         return ""
 
 
+def eliminar_producto_db(producto_id):
+    """
+    Cabecera:
+    Elimina permanentemente un producto o modelo de la tabla 'productos' en Supabase
+    según su identificador único (id).
+    - Parámetros:
+        producto_id (int): ID del registro a eliminar.
+    - Retorna: None.
+    """
+    supabase.table("productos").delete().eq("id", int(producto_id)).execute()  # Borra la fila en Supabase por ID
+
+
 def descontar_stock_pedido(carrito_dict, productos_frescos):
     """
     Cabecera:
@@ -444,7 +456,7 @@ def render_catalogo(productos):
     Cabecera:
     Renderiza el catálogo público con buscador, filtros por línea/temporada,
     mosaicos por tipo de producto (COQUET, FLOR, POMPÓN, SCRUNCHIES, MARIPOSAS,
-    WINCHAS, PULSERAS, ALMOHADONES NAVIDEÑOS), filtro interno de COQUET EN TELA
+    WINCHAS, PULSERAS, ALMOHADONES NAVIDEÑOS), filtro rápido de COQUET EN TELA
     y COQUET EN CINTA, y tarjetas de modelos con botones de color en stock.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
@@ -456,7 +468,7 @@ def render_catalogo(productos):
 
     busqueda = st.text_input(
         "🔍 BUSCAR POR TIPO, MODELO O COLOR",
-        placeholder="EJ. COQUET EN TELA, COQUET EN CINTA, COLA REDONDA, COLA LARGA, ROJO..."
+        placeholder="EJ. COQUET EN TELA, COQUET EN CINTA, COLA REDONDA, COLA LARGA, DELGADA, GRUESA..."
     )  # Barra de búsqueda en tiempo real
 
     # Extrae las líneas únicas preservando el orden de aparición
@@ -484,7 +496,7 @@ def render_catalogo(productos):
                 use_container_width=True
             ):
                 st.session_state["linea_activa"] = nombre_l  # Cambia la línea activa
-                st.session_state["tipo_activo"] = None  # Vuelve a los mosaicos de tipos de producto
+                st.session_state["tipo_activo"] = None  # Regresa a los mosaicos de tipos de producto
                 st.rerun()
 
     st.divider()
@@ -558,7 +570,7 @@ def render_catalogo(productos):
             # Si el usuario entra a COQUET, permite filtrar entre COQUET EN TELA y COQUET EN CINTA
             if tipo_sel == "COQUET":
                 filtro_coquet = st.radio(
-                    "FILTRAR COQUET POR MATERIAL / ESTILO:",
+                    "FILTRAR COQUET POR TIPO:",
                     ["TODOS", "COQUET EN TELA", "COQUET EN CINTA"],
                     horizontal=True,
                     key="filtro_estilo_coquet"
@@ -673,6 +685,7 @@ def render_catalogo(productos):
                         st.markdown("<div class='badge-agotado'>❌ AGOTADO</div>", unsafe_allow_html=True)
                         st.button("SIN STOCK DISPONIBLE", key=f"no_stk_{prod['id']}", disabled=True, use_container_width=True)
 
+
 def render_carrito(productos):
     """
     Cabecera:
@@ -686,7 +699,7 @@ def render_carrito(productos):
     st.subheader("🛒 CARRITO DE COMPRAS")
     st.write("REVISE LOS ARTÍCULOS EN SU CARRITO. AL CONFIRMAR, SE REGISTRARÁ EL PEDIDO, SE DESCONTARÁ EL STOCK Y PODRÁ ENVIARLO POR WHATSAPP.")
 
-    # Aviso obligatorio solicitado sobre el costo de envío adicional según destino
+    # Aviso obligatorio sobre el costo de envío adicional según destino
     st.markdown(
         "<div class='aviso-envio'>🚚 NOTA: EL COSTO DE ENVÍO ES ADICIONAL AL PRECIO DEL PRODUCTO SEGÚN EL DESTINO.</div>",
         unsafe_allow_html=True
@@ -906,12 +919,14 @@ def render_login_admin():
 def render_subtab_crear_producto():
     """
     Cabecera:
-    Renderiza el formulario para crear un nuevo tipo de producto (mosaico) y su
-    subproducto/modelo con precio de lista, colores en stock, foto y línea/temporada.
+    Renderiza el formulario para crear un nuevo tipo de producto (mosaico),
+    un subtipo/variante opcional (ej. COQUET EN TELA, COQUET EN CINTA) y su
+    subproducto/modelo (ej. COLA REDONDA, COLA LARGA, DELGADA, GRUESA) con precio,
+    colores en stock y foto.
     - Parámetros: ninguno.
     - Retorna: None.
     """
-    st.write("CREA UN **TIPO DE PRODUCTO** (EJ. *COQUET*, *FLOR*, *POMPÓN*, *SCRUNCHIES*, *MARIPOSAS*, *WINCHAS*, *PULSERAS*) Y SU **SUBPRODUCTO / MODELO** (EJ. *COLA REDONDA*, *COLA LARGA*, *GRANDE*, *MEDIANO*):")
+    st.write("CREA UN **TIPO DE PRODUCTO** (EJ. *COQUET*, *FLOR*, *POMPÓN*, *SCRUNCHIES*, *MARIPOSAS*, *WINCHAS*, *PULSERAS*), SU SUBTIPO OPCIONAL (EJ. *COQUET EN TELA*, *COQUET EN CINTA*) Y SU **SUBPRODUCTO / MODELO** (EJ. *COLA REDONDA*, *COLA LARGA*, *DELGADA*, *GRUESA*):")
     todos_existentes = cargar_productos(solo_activos=False)
     tipos_guardados = sorted(list(set(
         [normalizar_texto(t, "") for t in TIPOS_PRODUCTO_BASE] + [
@@ -927,8 +942,14 @@ def render_subtab_crear_producto():
             cat_nueva = st.text_input("O ESCRIBE NUEVA LÍNEA (OPCIONAL)")
         with c2:
             tipo_sel_form = st.selectbox("2. TIPO DE PRODUCTO (MOSAICO) *", tipos_guardados)
-            tipo_nuevo_form = st.text_input("O CREA UN TIPO DE PRODUCTO NUEVO (OPCIONAL)", placeholder="EJ. DIADEMAS, PRENDEDORES...")
-            sub_p = st.text_input("3. SUBPRODUCTO / MODELO * (EJ. COLA REDONDA, COLA LARGA, GRANDE)")
+            subtipo_opcional = st.text_input(
+                "SUBTIPO / DETALLE OPCIONAL (EJ. COQUET EN TELA, COQUET EN CINTA)",
+                placeholder="DEJAR VACÍO SI NO APLICA"
+            )  # Permite indicar COQUET EN TELA / COQUET EN CINTA o dejarlo vacío
+            sub_p = st.text_input(
+                "3. SUBPRODUCTO / MODELO * (EJ. COLA REDONDA, COLA LARGA, DELGADA, GRUESA)",
+                placeholder="EJ. COLA REDONDA, COLA LARGA, DELGADA, GRUESA"
+            )
         with c3:
             prec_p = st.number_input("4. PRECIO DE LISTA (BS.) *", min_value=0.0, step=1.0, format="%.2f")
             col_stk_p = st.text_input("5. COLORES Y STOCK * (EJ. ROJO:4, ROSA:6, AZUL:2)", value="ROJO:5, ROSA:5")
@@ -938,13 +959,20 @@ def render_subtab_crear_producto():
 
         if st.form_submit_button("💾 GUARDAR TIPO Y SUBPRODUCTO", type="primary"):
             cat_f = normalizar_texto(cat_nueva if cat_nueva.strip() else cat_sel, "ACCESORIOS PARA EL CABELLO")
-            tipo_f = normalizar_texto(tipo_nuevo_form if tipo_nuevo_form.strip() else tipo_sel_form, "")
-            sub_f = normalizar_texto(sub_p, "")
+            tipo_f = normalizar_texto(tipo_sel_form, "")
+            subtipo_f = normalizar_texto(subtipo_opcional, "") if subtipo_opcional.strip() else ""
+            modelo_f = normalizar_texto(sub_p, "")
             desc_f = normalizar_texto(desc_p, "")
 
-            if not tipo_f or not sub_f:
-                st.warning("⚠️ COMPLETA EL TIPO DE PRODUCTO Y EL SUBPRODUCTO/MODELO.")
+            if not tipo_f or not modelo_f:
+                st.warning("⚠️ COMPLETA EL TIPO DE PRODUCTO Y EL SUBPRODUCTO / MODELO.")
                 return
+
+            # Si se indicó subtipo (ej. COQUET EN TELA) y no se repitió dentro del modelo, los une cleanly
+            if subtipo_f and subtipo_f not in modelo_f:
+                subproducto_final = f"{subtipo_f} - {modelo_f}"
+            else:
+                subproducto_final = modelo_f
 
             col_tuplas = parsear_colores_stock(col_stk_p)
             stk_tot = sum(s for _, s in col_tuplas)
@@ -954,8 +982,8 @@ def render_subtab_crear_producto():
                 supabase.table("productos").insert({
                     "categoria": cat_f,
                     "tipo_producto": tipo_f,
-                    "nombre": f"{tipo_f} - {sub_f}",
-                    "subproducto": sub_f,
+                    "nombre": f"{tipo_f} - {subproducto_final}",
+                    "subproducto": subproducto_final,
                     "descripcion": desc_f,
                     "precio": float(prec_p),
                     "colores_stock": serializar_colores_stock(col_tuplas),
@@ -963,7 +991,7 @@ def render_subtab_crear_producto():
                     "imagen_url": url_img,
                     "activo": True
                 }).execute()  # Inserta el nuevo modelo en Supabase
-                st.success(f"✅ CREADO EN MOSAICO **{tipo_f}** → MODELO **{sub_f}**.")
+                st.success(f"✅ CREADO EN MOSAICO **{tipo_f}** → **{subproducto_final}**.")
                 st.rerun()
             except Exception as e:
                 st.error(f"ERROR AL CREAR PRODUCTO: {e}")
@@ -973,7 +1001,8 @@ def render_subtab_lista_precios():
     """
     Cabecera:
     Renderiza la tabla editable para configurar y actualizar en lote los precios de lista,
-    colores en stock, tipos de producto, modelos y visibilidad de cada ítem.
+    colores en stock, tipos de producto, modelos y visibilidad de cada ítem,
+    e incluye una herramienta para eliminar un producto/modelo específico.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -1038,6 +1067,25 @@ def render_subtab_lista_precios():
             st.rerun()
         except Exception as e:
             st.error(f"ERROR AL ACTUALIZAR TABLA: {e}")
+
+    st.divider()
+    st.subheader("🗑️ ELIMINAR UN PRODUCTO / MODELO ESPECÍFICO")  # Sección para borrar un registro individual
+
+    # Construye etiquetas descriptivas en mayúsculas para elegir el modelo a eliminar
+    opciones_borrar = {
+        f"#{p['id']} | {normalizar_texto(p.get('tipo_producto') or p.get('nombre'), 'GENERAL')} - "
+        f"{normalizar_texto(p.get('subproducto'), 'ESTÁNDAR')} ({float(p.get('precio') or 0):.2f} BS)": p["id"]
+        for p in todos_p
+    }
+    sel_borrar = st.selectbox("SELECCIONA EL REGISTRO A ELIMINAR", list(opciones_borrar.keys()))
+
+    if st.button("🗑️ ELIMINAR PRODUCTO SELECCIONADO"):
+        try:
+            eliminar_producto_db(opciones_borrar[sel_borrar])  # Ejecuta el borrado en Supabase
+            st.success("✅ PRODUCTO ELIMINADO CORRECTAMENTE.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"ERROR AL ELIMINAR PRODUCTO: {e}")
 
 
 def render_subtab_pedidos():
