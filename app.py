@@ -18,6 +18,9 @@ ZONA_BOLIVIA = ZoneInfo("America/La_Paz")
 NOMBRE_TIENDA = "MIMUNDOMICASA"
 WHATSAPP_TIENDA = "59170730777"
 
+# Longitud mínima recomendada para fortalecer la contraseña del administrador
+LONGITUD_MINIMA_PASSWORD = 8
+
 # Umbral para considerar que un producto o color tiene stock bajo / pocas unidades
 UMBRAL_STOCK_BAJO = 2
 
@@ -311,6 +314,19 @@ def eliminar_producto_db(producto_id):
     - Retorna: None.
     """
     supabase.table("productos").delete().eq("id", int(producto_id)).execute()  # Borra la fila en Supabase por ID
+
+
+def actualizar_password_admin_db(usuario, nueva_password):
+    """
+    Cabecera:
+    Actualiza la contraseña del usuario administrador en la tabla 'admin_tienda' de Supabase.
+    - Parámetros:
+        usuario (str): nombre de usuario del administrador.
+        nueva_password (str): nueva contraseña elegida.
+    - Retorna: None.
+    """
+    usuario_limpio = str(usuario or "").strip().lower()  # Normaliza usuario para coincidir con la tabla
+    supabase.table("admin_tienda").update({"password": nueva_password}).eq("usuario", usuario_limpio).execute()  # Actualiza clave
 
 
 def descontar_stock_pedido(carrito_dict, productos_frescos):
@@ -963,18 +979,71 @@ def render_login_admin():
                 r = supabase.table("admin_tienda").select("*").eq("usuario", u_in).eq("password", p_in).execute()
                 if r.data:
                     st.session_state["admin_autenticado"] = True
-                    st.session_state["admin_usuario"] = u_in.upper()
+                    st.session_state["admin_usuario"] = u_in
                     st.rerun()
                 else:
                     st.error("USUARIO O CONTRASEÑA INCORRECTOS.")
-            except Exception:
-                # Respaldo local en caso de falla temporal al consultar la tabla de admin
-                if u_in == "admin" and p_in == "12345":
-                    st.session_state["admin_autenticado"] = True
-                    st.session_state["admin_usuario"] = "ADMIN"
-                    st.rerun()
-                else:
-                    st.error("USUARIO O CONTRASEÑA INCORRECTOS.")
+            except Exception as e:
+                st.error(f"NO SE PUDO VALIDAR EL ACCESO: {e}")
+
+
+def render_cambiar_password_admin():
+    """
+    Cabecera:
+    Renderiza el formulario para que el administrador autenticado verifique su
+    contraseña actual y actualice su contraseña por una más segura en Supabase.
+    - Parámetros: ninguno.
+    - Retorna: None.
+    """
+    st.divider()
+    st.subheader("🔑 CAMBIAR CONTRASEÑA DE ADMINISTRADOR")
+    st.caption(f"USA AL MENOS {LONGITUD_MINIMA_PASSWORD} CARACTERES COMBINANDO LETRAS, NÚMEROS Y SÍMBOLOS.")
+
+    usuario_actual = str(st.session_state.get("admin_usuario") or "").strip().lower()
+
+    with st.form("form_cambiar_password_admin", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            pass_actual = st.text_input("CONTRASEÑA ACTUAL *", type="password")
+        with c2:
+            pass_nueva = st.text_input("NUEVA CONTRASEÑA *", type="password")
+        with c3:
+            pass_confirmar = st.text_input("CONFIRMAR NUEVA CONTRASEÑA *", type="password")
+
+        if st.form_submit_button("🔒 ACTUALIZAR CONTRASEÑA", type="primary"):
+            if not usuario_actual:
+                st.error("⚠️ NO SE IDENTIFICÓ EL USUARIO ADMINISTRADOR ACTIVO.")
+                return
+            if not pass_actual or not pass_nueva or not pass_confirmar:
+                st.warning("⚠️ COMPLETA LOS TRES CAMPOS DE CONTRASEÑA.")
+                return
+            if len(pass_nueva) < LONGITUD_MINIMA_PASSWORD:
+                st.warning(f"⚠️ LA NUEVA CONTRASEÑA DEBE TENER AL MENOS {LONGITUD_MINIMA_PASSWORD} CARACTERES.")
+                return
+            if pass_nueva == pass_actual:
+                st.warning("⚠️ LA NUEVA CONTRASEÑA DEBE SER DISTINTA A LA CONTRASEÑA ACTUAL.")
+                return
+            if pass_nueva != pass_confirmar:
+                st.warning("⚠️ LA NUEVA CONTRASEÑA Y SU CONFIRMACIÓN NO COINCIDEN.")
+                return
+
+            try:
+                # Verifica primero que la contraseña actual coincida con la guardada en Supabase
+                r_check = (
+                    supabase.table("admin_tienda")
+                    .select("usuario")
+                    .eq("usuario", usuario_actual)
+                    .eq("password", pass_actual)
+                    .execute()
+                )
+                if not r_check.data:
+                    st.error("❌ LA CONTRASEÑA ACTUAL ES INCORRECTA.")
+                    return
+
+                actualizar_password_admin_db(usuario_actual, pass_nueva)  # Guarda la nueva contraseña en Supabase
+                st.success("✅ CONTRASEÑA ACTUALIZADA CORRECTAMENTE.")
+            except Exception as e:
+                st.error(f"ERROR AL ACTUALIZAR LA CONTRASEÑA: {e}")
 
 
 def render_subtab_crear_producto():
@@ -1243,7 +1312,8 @@ def render_admin():
     """
     Cabecera:
     Controla el acceso al panel de administración y muestra las subpestañas para crear
-    tipos/modelos, editar la tabla de precios/colores/fotos y administrar pedidos.
+    tipos/modelos, editar la tabla de precios/colores/fotos, administrar pedidos
+    y cambiar la contraseña del administrador.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -1274,6 +1344,8 @@ def render_admin():
 
     with sub_pedidos:
         render_subtab_pedidos()
+
+    render_cambiar_password_admin()
 
 
 def main():
