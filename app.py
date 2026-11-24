@@ -1109,8 +1109,6 @@ def main():
     """
     configurar_pagina_y_estilos()  # Aplica configuración y estilos visuales
     inicializar_estado_sesion()  # Prepara variables de sesión
-    supabase_client = init_connection()  # Asegura conexión activa con Supabase
-    _ = supabase_client
 
     total_items_carrito = sum(st.session_state["carrito"].values())
     etiqueta_carrito = f"🛒 CARRITO ({total_items_carrito} ART.)" if total_items_carrito > 0 else "🛒 CARRITO (0 ART.)"
