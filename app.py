@@ -508,8 +508,8 @@ def configurar_pagina_y_estilos():
     """
     Cabecera:
     Configura los parámetros generales de la página en Streamlit e inyecta
-    los estilos CSS personalizados para que los botones de color sean la selección
-    parpadeante y debajo aparezca un cuadro estático con el color elegido.
+    los estilos CSS personalizados para que los cuadros de color parpadeen al
+    elegirse y debajo aparezca un cuadro estático con el color elegido.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -526,11 +526,11 @@ def configurar_pagina_y_estilos():
         [data-testid="collapsedControl"] {
             display: none !important;
         }
-        @keyframes parpadeo-boton-color {
+        @keyframes parpadeo-cuadro-color {
             0%, 100% {
                 opacity: 1;
                 transform: scale(1);
-                box-shadow: 0 0 0 2px #1565c0, 0 0 12px rgba(21, 101, 192, 0.65);
+                box-shadow: 0 0 0 2px #1565c0, 0 0 12px rgba(21, 101, 192, 0.7);
             }
             50% {
                 opacity: 0.45;
@@ -538,16 +538,28 @@ def configurar_pagina_y_estilos():
                 box-shadow: 0 0 0 3px #1976d2, 0 0 16px rgba(25, 118, 210, 0.85);
             }
         }
-        .muestra-encima-btn {
+        .cuadro-color-opcion {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
-            padding: 4px 6px;
-            margin-bottom: 4px;
-            border-radius: 6px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            padding: 7px 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background-color: #ffffff;
+            margin-bottom: 2px;
+        }
+        .cuadro-color-opcion-elegido {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 7px 8px;
+            border: 2px solid #1565c0;
+            border-radius: 8px;
+            background-color: #e3f2fd;
+            margin-bottom: 2px;
+            animation: parpadeo-cuadro-color 0.9s infinite;
         }
         .cuadro-color-elegido {
             display: flex;
@@ -560,7 +572,7 @@ def configurar_pagina_y_estilos():
             color: #0f172a;
             font-size: 13px;
             font-weight: 800;
-            margin: 6px 0 10px 0;
+            margin: 8px 0 10px 0;
             pointer-events: none;
         }
         .kiosco-header {
@@ -658,8 +670,9 @@ def render_catalogo(productos):
     """
     Cabecera:
     Renderiza el catálogo público mostrando únicamente productos con stock >= 1 y
-    precio > 0. Los botones de color son la selección (parpadean al elegirse) y debajo
-    se muestra un cuadro estático que indica el color elegido en texto.
+    precio > 0. Cada cuadro de color (simple, bicolor, rayas o puntos) permite elegirse
+    y parpadea al estar seleccionado, sin botones de texto duplicados debajo, y muestra
+    un cuadro estático inferior con el color elegido en texto.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
@@ -865,33 +878,27 @@ def render_catalogo(productos):
                     color_actual = st.session_state[key_color_sel]
                     stock_color_actual = dict(colores_disp).get(color_actual, 0)
 
-                    # Los mismos botones de color son la selección y parpadean cuando están elegidos
+                    # Cuadros de color: cada uno muestra su círculo y cantidad, y parpadea cuando está elegido
                     cols_colores = st.columns(min(len(colores_disp), 2))
                     for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
                         es_sel = (nom_c == color_actual)
                         muestra_html = render_muestra_color_html(nom_c)
-                        key_btn_col = f"btn_c_{prod['id']}_{nom_c}"
+                        clase_cuadro = "cuadro-color-opcion-elegido" if es_sel else "cuadro-color-opcion"
                         with cols_colores[idx_c % len(cols_colores)]:
                             st.markdown(
-                                f"<div class='muestra-encima-btn'>"
+                                f"<div class='{clase_cuadro}'>"
                                 f"{muestra_html}"
-                                f"<span style='font-size:11px;font-weight:700;color:#334155;'>({stk_c})</span>"
+                                f"<span style='font-size:12px;font-weight:800;color:#0f172a;'>({stk_c})</span>"
                                 f"</div>",
                                 unsafe_allow_html=True
                             )
                             if st.button(
-                                nom_c,
-                                key=key_btn_col,
-                                type="primary" if es_sel else "secondary",
+                                "●" if es_sel else "○",
+                                key=f"btn_c_{prod['id']}_{nom_c}",
                                 use_container_width=True
                             ):
-                                st.session_state[key_color_sel] = nom_c  # Actualiza el color elegido
+                                st.session_state[key_color_sel] = nom_c  # Marca este cuadro de color como elegido
                                 st.rerun()
-                            if es_sel:
-                                st.markdown(
-                                    f"<style>.st-key-{key_btn_col} button {{ animation: parpadeo-boton-color 0.9s infinite !important; }}</style>",
-                                    unsafe_allow_html=True
-                                )  # Hace parpadear directamente el botón de color elegido
 
                     # Cuadro estático (sin acción al hacer clic) que muestra en texto el color elegido
                     st.markdown(
