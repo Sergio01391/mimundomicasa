@@ -18,6 +18,9 @@ ZONA_BOLIVIA = ZoneInfo("America/La_Paz")
 NOMBRE_TIENDA = "MIMUNDOMICASA"
 WHATSAPP_TIENDA = "59170730777"
 
+# Umbral para considerar que un producto o color tiene stock bajo / pocas unidades
+UMBRAL_STOCK_BAJO = 2
+
 # Credenciales y bucket de almacenamiento en Supabase
 SUPABASE_URL = "https://ytwnelevkiggsodsinaf.supabase.co"
 SUPABASE_KEY = "sb_publishable_R21i4vgb0lI50KYpL3_q_A_lW9ED3n2"
@@ -164,6 +167,25 @@ def serializar_colores_stock(lista_tuplas):
     return ", ".join([f"{normalizar_texto(c, 'ÚNICO')}:{max(0, int(s))}" for c, s in lista_tuplas])
 
 
+def obtener_stock_total_producto(producto):
+    """
+    Cabecera:
+    Calcula el stock total disponible de un producto sumando las cantidades
+    de sus colores en stock (o usando el campo 'stock' si no hay colores).
+    - Parámetros:
+        producto (dict): diccionario con los datos del producto.
+    - Retorna: int con el stock total >= 0.
+    """
+    colores_lista = parsear_colores_stock(producto.get("colores_stock"))  # Obtiene tuplas (color, stock)
+    total_colores = sum(s for _, s in colores_lista)
+    if total_colores > 0:
+        return int(total_colores)
+    try:
+        return max(0, int(float(producto.get("stock") or 0)))  # Respaldo numérico si colores_stock está en 0
+    except ValueError:
+        return 0
+
+
 def color_hex(nombre_color):
     """
     Cabecera:
@@ -266,6 +288,19 @@ def subir_imagen_storage(archivo_subido):
         return ""
 
 
+def actualizar_imagen_producto_db(producto_id, url_imagen):
+    """
+    Cabecera:
+    Actualiza el campo 'imagen_url' de un producto o modelo existente en la tabla
+    'productos' de Supabase.
+    - Parámetros:
+        producto_id (int): ID del registro a actualizar.
+        url_imagen (str): URL pública de la fotografía subida.
+    - Retorna: None.
+    """
+    supabase.table("productos").update({"imagen_url": url_imagen}).eq("id", int(producto_id)).execute()  # Guarda URL en DB
+
+
 def eliminar_producto_db(producto_id):
     """
     Cabecera:
@@ -344,7 +379,8 @@ def configurar_pagina_y_estilos():
     """
     Cabecera:
     Configura los parámetros generales de la página en Streamlit e inyecta
-    los estilos CSS personalizados para el catálogo, tarjetas de color, aviso de envío y botón de WhatsApp.
+    los estilos CSS personalizados para el catálogo, tarjetas de color, stock bajo,
+    aviso de envío y botón de WhatsApp.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -409,12 +445,13 @@ def configurar_pagina_y_estilos():
             border-radius: 6px;
             margin-bottom: 6px;
         }
-        .badge-agotado {
+        .badge-stock-bajo {
             display: inline-block;
-            background-color: #ffebee;
-            color: #c62828;
+            background-color: #fff8e1;
+            color: #b45309;
+            border: 1px solid #f59e0b;
             font-size: 12px;
-            font-weight: 700;
+            font-weight: 800;
             padding: 3px 8px;
             border-radius: 6px;
             margin-bottom: 6px;
@@ -454,17 +491,23 @@ def configurar_pagina_y_estilos():
 def render_catalogo(productos):
     """
     Cabecera:
-    Renderiza el catálogo público con buscador, filtros por línea/temporada,
-    mosaicos por tipo de producto (COQUET, FLOR, POMPÓN, SCRUNCHIES, MARIPOSAS,
-    WINCHAS, PULSERAS, ALMOHADONES NAVIDEÑOS), filtro rápido de COQUET EN TELA
-    y COQUET EN CINTA, y tarjetas de modelos con botones de color en stock.
+    Renderiza el catálogo público mostrando únicamente productos con stock >= 1 y
+    precio > 0 (si el stock es menor a 1 o igual a 0, no se muestran). Incluye buscador,
+    filtros por línea, mosaicos por tipo de producto, filtro rápido de COQUET EN TELA
+    y COQUET EN CINTA, avisos de stock bajo y tarjetas con botones de color.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
     """
-    if not productos:
-        st.info("AÚN NO HAY PRODUCTOS ACTIVOS EN EL CATÁLOGO.")
-        return  # Sale temprano si no hay productos publicados
+    # Filtra estrictamente productos con stock >= 1 y precio > 0 para no mostrar ítems con stock 0 o menor a 1
+    productos_visibles = [
+        p for p in productos
+        if obtener_stock_total_producto(p) >= 1 and float(p.get("precio") or 0) > 0
+    ]
+
+    if not productos_visibles:
+        st.info("AÚN NO HAY PRODUCTOS CON STOCK DISPONIBLE EN EL CATÁLOGO.")
+        return  # Sale temprano si no hay productos con stock >= 1
 
     busqueda = st.text_input(
         "🔍 BUSCAR POR TIPO, MODELO O COLOR",
@@ -473,14 +516,14 @@ def render_catalogo(productos):
 
     # Extrae las líneas únicas preservando el orden de aparición
     lineas = []
-    for p in productos:
+    for p in productos_visibles:
         cat = normalizar_texto(p.get("categoria"), "ACCESORIOS PARA EL CABELLO")
         if cat not in lineas:
             lineas.append(cat)
 
-    # Construye botones de línea con contador de artículos
-    botones_linea = [("TODAS", len(productos))] + [
-        (cat, sum(1 for x in productos if normalizar_texto(x.get("categoria"), "ACCESORIOS PARA EL CABELLO") == cat))
+    # Construye botones de línea con contador de artículos con stock
+    botones_linea = [("TODAS", len(productos_visibles))] + [
+        (cat, sum(1 for x in productos_visibles if normalizar_texto(x.get("categoria"), "ACCESORIOS PARA EL CABELLO") == cat))
         for cat in lineas
     ]
 
@@ -505,7 +548,7 @@ def render_catalogo(productos):
     tipo_sel = st.session_state["tipo_activo"]
 
     # Filtra productos según la línea seleccionada
-    productos_linea = productos
+    productos_linea = productos_visibles
     if linea_sel != "TODAS":
         productos_linea = [
             p for p in productos_linea
@@ -527,7 +570,7 @@ def render_catalogo(productos):
             items_tp = [
                 x for x in productos_linea
                 if normalizar_texto(x.get("tipo_producto") or x.get("nombre"), "GENERAL") == tp_nombre
-            ]  # Modelos pertenecientes a este mosaico
+            ]  # Modelos con stock pertenecientes a este mosaico
             foto_tp = next((x.get("imagen_url") for x in items_tp if (x.get("imagen_url") or "").strip()), "")
             subproductos_preview = ", ".join(
                 dict.fromkeys([
@@ -604,7 +647,7 @@ def render_catalogo(productos):
             ]
 
         if not filtrados:
-            st.warning("NO SE ENCONTRARON MODELOS CON ESE CRITERIO.")
+            st.info("NO HAY MODELOS CON STOCK DISPONIBLE PARA ESE FILTRO.")
             return
 
         cols_prod = st.columns(3)
@@ -624,8 +667,8 @@ def render_catalogo(productos):
                     subp = normalizar_texto(prod.get("subproducto") or prod.get("nombre"), "ESTÁNDAR")
                     precio = float(prod.get("precio") or 0)
                     colores_lista = parsear_colores_stock(prod.get("colores_stock"))
-                    colores_disp = [(c, s) for c, s in colores_lista if s > 0]  # Solo colores con stock disponible
-                    stock_total = sum(s for _, s in colores_lista)
+                    colores_disp = [(c, s) for c, s in colores_lista if s >= 1]  # Solo colores con stock >= 1
+                    stock_total = obtener_stock_total_producto(prod)
 
                     st.caption(f"{normalizar_texto(prod.get('categoria'), 'GENERAL')} · {tp_prod}")
                     st.markdown(f"### {subp}")
@@ -633,65 +676,78 @@ def render_catalogo(productos):
                         st.write(normalizar_texto(prod["descripcion"], ""))
                     st.markdown(f"<div class='precio-lista'>{precio:.2f} BS</div>", unsafe_allow_html=True)
 
-                    if stock_total > 0 and precio > 0:
-                        st.markdown(f"<div class='badge-stock'>STOCK DISPONIBLE: {stock_total} UNID.</div>", unsafe_allow_html=True)
-                        st.caption("COLORES DISPONIBLES EN STOCK:")
-
-                        key_color_sel = f"color_sel_{prod['id']}"
-                        nombres_disp = [c for c, _ in colores_disp]
-                        if key_color_sel not in st.session_state or st.session_state[key_color_sel] not in nombres_disp:
-                            st.session_state[key_color_sel] = nombres_disp[0]  # Selecciona el primer color disponible
-
-                        color_actual = st.session_state[key_color_sel]
-
-                        # Botones visuales por cada color disponible en stock
-                        cols_colores = st.columns(min(len(colores_disp), 3))
-                        for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
-                            hex_c = color_hex(nom_c)
-                            es_sel = (nom_c == color_actual)
-                            borde = "3px solid #1565c0" if es_sel else "1px solid #cbd5e1"
-                            with cols_colores[idx_c % len(cols_colores)]:
-                                st.markdown(
-                                    f"<div style='display:flex;align-items:center;gap:6px;padding:4px 6px;border:{borde};border-radius:6px;margin-bottom:4px;background:#fff;'>"
-                                    f"<span style='display:inline-block;width:14px;height:14px;border-radius:50%;background:{hex_c};border:1px solid #999;'></span>"
-                                    f"<span style='font-size:12px;font-weight:700;'>{nom_c} ({stk_c})</span>"
-                                    f"</div>",
-                                    unsafe_allow_html=True
-                                )
-                                if st.button(
-                                    "ELEGIDO ✓" if es_sel else f"{nom_c}",
-                                    key=f"btn_c_{prod['id']}_{nom_c}",
-                                    use_container_width=True
-                                ):
-                                    st.session_state[key_color_sel] = nom_c  # Actualiza color seleccionado
-                                    st.rerun()
-
-                        stock_color_actual = dict(colores_disp).get(color_actual, 0)
-                        en_carrito_color = st.session_state["carrito"].get((prod["id"], color_actual), 0)
-
-                        if st.button(
-                            f"🛒 AGREGAR ({color_actual}) AL CARRITO",
-                            key=f"add_cart_{prod['id']}",
-                            type="primary",
-                            use_container_width=True
-                        ):
-                            if en_carrito_color < stock_color_actual:
-                                st.session_state["carrito"][(prod["id"], color_actual)] = en_carrito_color + 1  # Agrega unidad al carrito
-                                st.toast(f"✅ AGREGADO: {tp_prod} - {subp} [{color_actual}]")
-                                st.rerun()
-                            else:
-                                st.warning(f"⚠️ NO HAY MÁS UNIDADES EN COLOR {color_actual}.")
+                    if stock_total <= UMBRAL_STOCK_BAJO:
+                        st.markdown(
+                            f"<div class='badge-stock-bajo'>⚠️ STOCK BAJO: QUEDAN {stock_total} UNID.</div>",
+                            unsafe_allow_html=True
+                        )  # Alerta cuando el stock total del modelo es menor o igual al umbral
                     else:
-                        st.markdown("<div class='badge-agotado'>❌ AGOTADO</div>", unsafe_allow_html=True)
-                        st.button("SIN STOCK DISPONIBLE", key=f"no_stk_{prod['id']}", disabled=True, use_container_width=True)
+                        st.markdown(
+                            f"<div class='badge-stock'>STOCK DISPONIBLE: {stock_total} UNID.</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    st.caption("COLORES DISPONIBLES EN STOCK:")
+
+                    if not colores_disp:
+                        colores_disp = [("ÚNICO", stock_total)]
+
+                    key_color_sel = f"color_sel_{prod['id']}"
+                    nombres_disp = [c for c, _ in colores_disp]
+                    if key_color_sel not in st.session_state or st.session_state[key_color_sel] not in nombres_disp:
+                        st.session_state[key_color_sel] = nombres_disp[0]  # Selecciona el primer color disponible
+
+                    color_actual = st.session_state[key_color_sel]
+                    stock_color_actual = dict(colores_disp).get(color_actual, 0)
+
+                    # Aviso específico si el color seleccionado tiene stock menor o igual al umbral
+                    if stock_color_actual <= UMBRAL_STOCK_BAJO:
+                        st.caption(f"⚠️ QUEDAN POCAS UNIDADES EN {color_actual} ({stock_color_actual} DISP.).")
+
+                    # Botones visuales por cada color disponible en stock (>= 1)
+                    cols_colores = st.columns(min(len(colores_disp), 3))
+                    for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
+                        hex_c = color_hex(nom_c)
+                        es_sel = (nom_c == color_actual)
+                        borde = "3px solid #1565c0" if es_sel else "1px solid #cbd5e1"
+                        with cols_colores[idx_c % len(cols_colores)]:
+                            st.markdown(
+                                f"<div style='display:flex;align-items:center;gap:6px;padding:4px 6px;border:{borde};border-radius:6px;margin-bottom:4px;background:#fff;'>"
+                                f"<span style='display:inline-block;width:14px;height:14px;border-radius:50%;background:{hex_c};border:1px solid #999;'></span>"
+                                f"<span style='font-size:12px;font-weight:700;'>{nom_c} ({stk_c})</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
+                            if st.button(
+                                "ELEGIDO ✓" if es_sel else f"{nom_c}",
+                                key=f"btn_c_{prod['id']}_{nom_c}",
+                                use_container_width=True
+                            ):
+                                st.session_state[key_color_sel] = nom_c  # Actualiza color seleccionado
+                                st.rerun()
+
+                    en_carrito_color = st.session_state["carrito"].get((prod["id"], color_actual), 0)
+
+                    if st.button(
+                        f"🛒 AGREGAR ({color_actual}) AL CARRITO",
+                        key=f"add_cart_{prod['id']}",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        if en_carrito_color < stock_color_actual:
+                            st.session_state["carrito"][(prod["id"], color_actual)] = en_carrito_color + 1  # Agrega unidad al carrito
+                            st.toast(f"✅ AGREGADO: {tp_prod} - {subp} [{color_actual}]")
+                            st.rerun()
+                        else:
+                            st.warning(f"⚠️ STOCK MENOR AL SOLICITADO: SOLO HAY {stock_color_actual} EN {color_actual}.")
 
 
 def render_carrito(productos):
     """
     Cabecera:
     Renderiza el carrito de compras con tabla de artículos (descripción, precio unitario,
-    cantidad con botones +/- e importe), subtotal, aviso de costo de envío adicional
-    según destino, formulario de datos del cliente/ubicación y confirmación a WhatsApp.
+    cantidad con botones +/- e importe), avisos si el stock es menor al solicitado,
+    subtotal, aviso de costo de envío adicional según destino y envío a WhatsApp.
     - Parámetros:
         productos (list[dict]): lista de productos activos desde Supabase.
     - Retorna: None.
@@ -719,7 +775,7 @@ def render_carrito(productos):
             st.rerun()
         st.divider()
 
-    productos_map = {p["id"]: p for p in productos}
+    productos_map = {p["id"]: p for p in productos if obtener_stock_total_producto(p) >= 1}
     carrito = st.session_state["carrito"]
 
     # Limpia ítems del carrito que ya no tengan stock en su color elegido
@@ -729,7 +785,7 @@ def render_carrito(productos):
             del carrito[clave_item]
             continue
         colores_dict = dict(parsear_colores_stock(productos_map[pid].get("colores_stock")))
-        if colores_dict.get(col_item, 0) <= 0:
+        if colores_dict.get(col_item, 0) < 1:
             del carrito[clave_item]
 
     if not carrito:
@@ -768,7 +824,10 @@ def render_carrito(productos):
         r1, r2, r3, r4 = st.columns([4.5, 1.8, 2.2, 1.8], vertical_alignment="center")
         with r1:
             st.markdown(f"**{tp_prod}** · *{subp}*")
-            st.caption(f"COLOR: **{col_norm}** · STOCK COLOR: {max_col}")
+            if max_col <= UMBRAL_STOCK_BAJO:
+                st.caption(f"COLOR: **{col_norm}** · ⚠️ STOCK MENOR: {max_col} UNID.")  # Resalta stock reducido
+            else:
+                st.caption(f"COLOR: **{col_norm}** · STOCK COLOR: {max_col}")
         with r2:
             st.write(f"{precio_u:.2f} BS")
         with r3:
@@ -788,7 +847,7 @@ def render_carrito(productos):
                         carrito[clave_item] = cant + 1  # Incrementa cantidad si hay stock
                         st.rerun()
                     else:
-                        st.warning("STOCK MÁXIMO EN ESTE COLOR.")
+                        st.warning(f"⚠️ STOCK MENOR: SOLO HAY {max_col} EN {col_norm}.")
         with r4:
             st.markdown(f"**{importe:.2f} BS**")
 
@@ -840,14 +899,16 @@ def render_carrito(productos):
                     errores_stock.append(f"PRODUCTO ID {pid}")
                     continue
                 col_map = dict(parsear_colores_stock(prod_frescos[pid].get("colores_stock")))
-                if col_map.get(col_item, 0) < cant:
+                disp_real = col_map.get(col_item, 0)
+                if disp_real < cant:
                     errores_stock.append(
                         f"{normalizar_texto(prod_frescos[pid].get('tipo_producto'), 'PRODUCTO')} - "
-                        f"{normalizar_texto(prod_frescos[pid].get('subproducto'), 'MODELO')} ({normalizar_texto(col_item, 'COLOR')})"
+                        f"{normalizar_texto(prod_frescos[pid].get('subproducto'), 'MODELO')} "
+                        f"({normalizar_texto(col_item, 'COLOR')}: DISP. {disp_real}, PEDIDO {cant})"
                     )
 
             if errores_stock:
-                st.error(f"⚠️ STOCK INSUFICIENTE PARA: {', '.join(errores_stock)}. ACTUALIZA LAS CANTIDADES.")
+                st.error(f"⚠️ STOCK MENOR AL SOLICITADO EN: {', '.join(errores_stock)}. ACTUALIZA LAS CANTIDADES.")
                 return
 
             try:
@@ -1002,7 +1063,8 @@ def render_subtab_lista_precios():
     Cabecera:
     Renderiza la tabla editable para configurar y actualizar en lote los precios de lista,
     colores en stock, tipos de producto, modelos y visibilidad de cada ítem,
-    e incluye una herramienta para eliminar un producto/modelo específico.
+    resalta ítems con stock menor o igual al umbral, permite agregar/actualizar
+    fotografía tras crear el producto y permite eliminar un registro específico.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -1011,6 +1073,16 @@ def render_subtab_lista_precios():
     if not todos_p:
         st.info("NO HAY PRODUCTOS REGISTRADOS TODAVÍA.")
         return
+
+    # Lista productos con stock total menor o igual al umbral para alerta rápida en administración
+    bajos_stock = [
+        f"{normalizar_texto(p.get('tipo_producto') or p.get('nombre'), 'GENERAL')} - "
+        f"{normalizar_texto(p.get('subproducto'), 'ESTÁNDAR')} ({obtener_stock_total_producto(p)} UNID.)"
+        for p in todos_p
+        if obtener_stock_total_producto(p) <= UMBRAL_STOCK_BAJO
+    ]
+    if bajos_stock:
+        st.warning(f"⚠️ PRODUCTOS CON STOCK MENOR O IGUAL A {UMBRAL_STOCK_BAJO} UNID.: {', '.join(bajos_stock)}")
 
     df_lista = pd.DataFrame([
         {
@@ -1069,9 +1141,46 @@ def render_subtab_lista_precios():
             st.error(f"ERROR AL ACTUALIZAR TABLA: {e}")
 
     st.divider()
+    st.subheader("🖼️ AGREGAR O ACTUALIZAR FOTOGRAFÍA DE UN PRODUCTO")  # Permite subir foto tras crear el producto
+
+    productos_por_id = {p["id"]: p for p in todos_p}
+    opciones_foto = {
+        f"#{p['id']} | {normalizar_texto(p.get('tipo_producto') or p.get('nombre'), 'GENERAL')} - "
+        f"{normalizar_texto(p.get('subproducto'), 'ESTÁNDAR')} ({float(p.get('precio') or 0):.2f} BS)": p["id"]
+        for p in todos_p
+    }
+    sel_foto_id = opciones_foto[st.selectbox("SELECCIONA EL PRODUCTO / MODELO PARA AGREGAR FOTOGRAFÍA", list(opciones_foto.keys()))]
+    prod_foto_actual = productos_por_id[sel_foto_id]
+
+    col_f1, col_f2 = st.columns([1.2, 2])
+    with col_f1:
+        img_previa = (prod_foto_actual.get("imagen_url") or "").strip()
+        if img_previa:
+            st.image(img_previa, caption="FOTOGRAFÍA ACTUAL", width=180)  # Muestra la foto actual si ya existe
+        else:
+            st.caption("ESTE PRODUCTO AÚN NO TIENE FOTOGRAFÍA.")
+    with col_f2:
+        nueva_foto = st.file_uploader(
+            "AGREGAR FOTOGRAFÍA",
+            type=["jpg", "jpeg", "png", "webp"],
+            key=f"uploader_foto_{sel_foto_id}"
+        )  # Campo para seleccionar la imagen a subir
+        if st.button("📸 GUARDAR FOTOGRAFÍA", key=f"btn_guardar_foto_{sel_foto_id}"):
+            if nueva_foto is None:
+                st.warning("⚠️ PRIMERO SELECCIONA UNA FOTOGRAFÍA.")
+            else:
+                url_subida = subir_imagen_storage(nueva_foto)  # Sube imagen al bucket de Supabase
+                if url_subida:
+                    try:
+                        actualizar_imagen_producto_db(sel_foto_id, url_subida)  # Guarda URL en el producto
+                        st.success("✅ FOTOGRAFÍA AGREGADA Y GUARDADA EN EL CATÁLOGO.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"ERROR AL GUARDAR FOTOGRAFÍA: {e}")
+
+    st.divider()
     st.subheader("🗑️ ELIMINAR UN PRODUCTO / MODELO ESPECÍFICO")  # Sección para borrar un registro individual
 
-    # Construye etiquetas descriptivas en mayúsculas para elegir el modelo a eliminar
     opciones_borrar = {
         f"#{p['id']} | {normalizar_texto(p.get('tipo_producto') or p.get('nombre'), 'GENERAL')} - "
         f"{normalizar_texto(p.get('subproducto'), 'ESTÁNDAR')} ({float(p.get('precio') or 0):.2f} BS)": p["id"]
@@ -1134,7 +1243,7 @@ def render_admin():
     """
     Cabecera:
     Controla el acceso al panel de administración y muestra las subpestañas para crear
-    tipos/modelos, editar la tabla de precios/colores y administrar pedidos.
+    tipos/modelos, editar la tabla de precios/colores/fotos y administrar pedidos.
     - Parámetros: ninguno.
     - Retorna: None.
     """
