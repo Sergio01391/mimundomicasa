@@ -21,6 +21,17 @@ SUPABASE_URL = "https://ytwnelevkiggsodsinaf.supabase.co"
 SUPABASE_KEY = "sb_publishable_R21i4vgb0lI50KYpL3_q_A_lW9ED3n2"
 BUCKET_FOTOS = "fotos_productos"
 
+TIPOS_PRODUCTO_BASE = [
+    "Coquet",
+    "Flor",
+    "Pompón",
+    "Scrunchies",
+    "Mariposas",
+    "Winchas",
+    "Pulseras",
+    "Almohadones Navideños"
+]
+
 MAPA_COLORES_CSS = {
     "rojo": "#e53935",
     "azul": "#1e88e5",
@@ -50,12 +61,10 @@ MAPA_COLORES_CSS = {
 }
 
 def parsear_colores_stock(texto_colores):
-    """Convierte 'Rojo:4, Azul:2' en [('Rojo', 4), ('Azul', 2)]."""
     resultado = []
     if not texto_colores or not str(texto_colores).strip():
         return [("Único", 0)]
-    partes = str(texto_colores).split(",")
-    for parte in partes:
+    for parte in str(texto_colores).split(","):
         parte = parte.strip()
         if not parte:
             continue
@@ -88,7 +97,7 @@ def init_connection():
 supabase = init_connection()
 
 st.set_page_config(
-    page_title=f"{NOMBRE_TIENDA} | Tienda Virtual",
+    page_title=f"{NOMBRE_TIENDA} | Catálogo",
     page_icon="🎀",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -117,6 +126,20 @@ st.markdown("""
         font-size: 13px;
         opacity: 0.92;
         margin-top: 2px;
+    }
+    .seccion-banner {
+        text-align: center;
+        font-size: 22px;
+        font-weight: 700;
+        color: #1e293b;
+        margin: 8px 0 4px 0;
+    }
+    .seccion-subrayado {
+        width: 90px;
+        height: 4px;
+        background-color: #1976d2;
+        margin: 0 auto 18px auto;
+        border-radius: 2px;
     }
     .precio-lista {
         font-size: 20px;
@@ -176,11 +199,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- ESTADO DE SESIÓN ---
-# carrito guarda {(id_producto, color): cantidad}
 if "carrito" not in st.session_state:
     st.session_state["carrito"] = {}
 if "linea_activa" not in st.session_state:
     st.session_state["linea_activa"] = "TODAS"
+if "tipo_activo" not in st.session_state:
+    st.session_state["tipo_activo"] = None  # None = muestra mosaicos de Tipos de Producto
 if "admin_autenticado" not in st.session_state:
     st.session_state["admin_autenticado"] = False
 if "admin_usuario" not in st.session_state:
@@ -234,7 +258,7 @@ tab_catalogo, tab_carrito, tab_admin = st.tabs([
 ])
 
 # ==========================================
-# PESTAÑA 1: CATÁLOGO CON BOTONES DE COLOR
+# PESTAÑA 1: CATÁLOGO CON MOSAICOS DE TIPO DE PRODUCTO
 # ==========================================
 with tab_catalogo:
     productos = cargar_productos(solo_activos=True)
@@ -243,25 +267,26 @@ with tab_catalogo:
         st.info("Aún no hay productos activos en el catálogo.")
     else:
         busqueda = st.text_input(
-            "🔍 Buscar por producto, subproducto, línea o color",
-            placeholder="Ej. Coquet, Scrunchies, Winchas, Almohadones Navideños, Rojo..."
+            "🔍 Buscar por tipo, modelo o color",
+            placeholder="Ej. Coquet, Cola Redonda, Cola Larga, Scrunchies, Winchas, Rojo..."
         )
 
+        # Barra superior de Líneas / Temporadas
         lineas = []
         for p in productos:
-            cat = (p.get("categoria") or "General").strip()
+            cat = (p.get("categoria") or "Accesorios para el Cabello").strip()
             if cat not in lineas:
                 lineas.append(cat)
 
         botones_linea = [("TODAS", len(productos))] + [
-            (cat, sum(1 for x in productos if (x.get("categoria") or "General").strip() == cat))
+            (cat, sum(1 for x in productos if (x.get("categoria") or "Accesorios para el Cabello").strip() == cat))
             for cat in lineas
         ]
 
         cols_lineas = st.columns(len(botones_linea))
         for idx_l, (nombre_l, cant_l) in enumerate(botones_linea):
             etiqueta_l = f"INICIO ({cant_l})" if nombre_l == "TODAS" else f"{nombre_l} ({cant_l})"
-            es_actual = (st.session_state["linea_activa"] == nombre_l)
+            es_actual = (st.session_state["linea_activa"] == nombre_l and st.session_state["tipo_activo"] is None)
             with cols_lineas[idx_l]:
                 if st.button(
                     etiqueta_l,
@@ -270,102 +295,158 @@ with tab_catalogo:
                     use_container_width=True
                 ):
                     st.session_state["linea_activa"] = nombre_l
+                    st.session_state["tipo_activo"] = None
                     st.rerun()
-
-        linea_sel = st.session_state["linea_activa"]
-        filtrados = productos
-        if linea_sel != "TODAS":
-            filtrados = [p for p in filtrados if (p.get("categoria") or "General").strip() == linea_sel]
-
-        if busqueda.strip():
-            term = busqueda.strip().lower()
-            filtrados = [
-                p for p in filtrados
-                if term in (p.get("nombre") or "").lower()
-                or term in (p.get("subproducto") or "").lower()
-                or term in (p.get("categoria") or "").lower()
-                or term in (p.get("colores_stock") or "").lower()
-            ]
 
         st.divider()
 
-        if not filtrados:
-            st.warning("No se encontraron productos con ese filtro.")
-        else:
-            cols_prod = st.columns(3)
-            for idx_p, prod in enumerate(filtrados):
-                with cols_prod[idx_p % 3]:
+        linea_sel = st.session_state["linea_activa"]
+        tipo_sel = st.session_state["tipo_activo"]
+
+        productos_linea = productos
+        if linea_sel != "TODAS":
+            productos_linea = [p for p in productos_linea if (p.get("categoria") or "Accesorios para el Cabello").strip() == linea_sel]
+
+        # MODO 1: MOSAICOS DE TIPOS DE PRODUCTO (Coquet, Flor, Pompón, Scrunchies, Mariposas, Winchas, Pulseras...)
+        if tipo_sel is None and not busqueda.strip():
+            st.markdown("<div class='seccion-banner'>Selecciona un tipo de producto</div><div class='seccion-subrayado'></div>", unsafe_allow_html=True)
+
+            tipos_disponibles = []
+            for p in productos_linea:
+                tp = (p.get("tipo_producto") or p.get("nombre") or "General").strip()
+                if tp not in tipos_disponibles:
+                    tipos_disponibles.append(tp)
+
+            cols_mosaico = st.columns(4)
+            for idx_t, tp_nombre in enumerate(tipos_disponibles):
+                items_tp = [x for x in productos_linea if (x.get("tipo_producto") or x.get("nombre") or "General").strip() == tp_nombre]
+                foto_tp = next((x.get("imagen_url") for x in items_tp if (x.get("imagen_url") or "").strip()), "")
+                subproductos_preview = ", ".join(
+                    dict.fromkeys([(x.get("subproducto") or x.get("nombre") or "").strip() for x in items_tp if (x.get("subproducto") or "").strip()])
+                )
+                with cols_mosaico[idx_t % 4]:
                     with st.container(border=True):
-                        img_url = (prod.get("imagen_url") or "").strip()
-                        if img_url:
-                            st.image(img_url, use_container_width=True)
+                        if foto_tp:
+                            st.image(foto_tp, use_container_width=True)
                         else:
                             st.markdown(
-                                "<div style='height:140px;background:#f8fafc;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;'>🎀 Sin imagen</div>",
+                                f"<div style='height:145px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#475569;font-weight:800;font-size:16px;text-align:center;padding:8px;'>🎀 {tp_nombre.upper()}</div>",
                                 unsafe_allow_html=True
                             )
+                        st.markdown(f"### {tp_nombre}")
+                        if subproductos_preview:
+                            st.caption(f"Modelos: {subproductos_preview}")
+                        st.write(f"**{len(items_tp)}** modelos disponibles")
+                        if st.button(f"Ver modelos →", key=f"open_tipo_{idx_t}", type="primary", use_container_width=True):
+                            st.session_state["tipo_activo"] = tp_nombre
+                            st.rerun()
 
-                        subp = (prod.get("subproducto") or "Estándar").strip()
-                        precio = float(prod.get("precio") or 0)
-                        colores_lista = parsear_colores_stock(prod.get("colores_stock"))
-                        colores_disp = [(c, s) for c, s in colores_lista if s > 0]
-                        stock_total = sum(s for _, s in colores_lista)
+        # MODO 2: DENTRO DE UN TIPO DE PRODUCTO (O RESULTADOS DE BÚSQUEDA)
+        else:
+            if tipo_sel is not None:
+                col_back, col_tit = st.columns([1.3, 4], vertical_alignment="center")
+                with col_back:
+                    if st.button("⬅️ Volver a los productos", use_container_width=True):
+                        st.session_state["tipo_activo"] = None
+                        st.rerun()
+                with col_tit:
+                    st.markdown(f"<div class='seccion-banner' style='text-align:left;margin:0;'>{tipo_sel}</div>", unsafe_allow_html=True)
+                st.divider()
 
-                        st.caption(f"{prod.get('categoria') or 'General'}")
-                        st.markdown(f"**{prod['nombre']}** · *{subp}*")
-                        st.markdown(f"<div class='precio-lista'>{precio:.2f} Bs</div>", unsafe_allow_html=True)
+            filtrados = productos_linea
+            if tipo_sel is not None:
+                filtrados = [p for p in filtrados if (p.get("tipo_producto") or p.get("nombre") or "General").strip() == tipo_sel]
 
-                        if stock_total > 0 and precio > 0:
-                            st.markdown(f"<div class='badge-stock'>Stock total: {stock_total} unid.</div>", unsafe_allow_html=True)
-                            st.caption("Colores disponibles en stock (haz clic para elegir):")
+            if busqueda.strip():
+                term = busqueda.strip().lower()
+                filtrados = [
+                    p for p in filtrados
+                    if term in (p.get("tipo_producto") or "").lower()
+                    or term in (p.get("nombre") or "").lower()
+                    or term in (p.get("subproducto") or "").lower()
+                    or term in (p.get("categoria") or "").lower()
+                    or term in (p.get("colores_stock") or "").lower()
+                ]
 
-                            # Botones de color con muestra visual y stock
-                            key_color_sel = f"color_sel_{prod['id']}"
-                            nombres_disp = [c for c, _ in colores_disp]
-                            if key_color_sel not in st.session_state or st.session_state[key_color_sel] not in nombres_disp:
-                                st.session_state[key_color_sel] = nombres_disp[0]
+            if not filtrados:
+                st.warning("No se encontraron modelos con ese criterio.")
+            else:
+                cols_prod = st.columns(3)
+                for idx_p, prod in enumerate(filtrados):
+                    with cols_prod[idx_p % 3]:
+                        with st.container(border=True):
+                            img_url = (prod.get("imagen_url") or "").strip()
+                            if img_url:
+                                st.image(img_url, use_container_width=True)
+                            else:
+                                st.markdown(
+                                    "<div style='height:150px;background:#f8fafc;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;'>🎀 Sin imagen</div>",
+                                    unsafe_allow_html=True
+                                )
 
-                            color_actual = st.session_state[key_color_sel]
+                            tp_prod = (prod.get("tipo_producto") or prod.get("nombre") or "General").strip()
+                            subp = (prod.get("subproducto") or prod.get("nombre") or "Estándar").strip()
+                            precio = float(prod.get("precio") or 0)
+                            colores_lista = parsear_colores_stock(prod.get("colores_stock"))
+                            colores_disp = [(c, s) for c, s in colores_lista if s > 0]
+                            stock_total = sum(s for _, s in colores_lista)
 
-                            cols_colores = st.columns(min(len(colores_disp), 3))
-                            for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
-                                hex_c = color_hex(nom_c)
-                                es_sel = (nom_c == color_actual)
-                                borde = "3px solid #1565c0" if es_sel else "1px solid #cbd5e1"
-                                with cols_colores[idx_c % len(cols_colores)]:
-                                    st.markdown(
-                                        f"<div style='display:flex;align-items:center;gap:6px;padding:4px 6px;border:{borde};border-radius:6px;margin-bottom:4px;background:#fff;'>"
-                                        f"<span style='display:inline-block;width:14px;height:14px;border-radius:50%;background:{hex_c};border:1px solid #999;'></span>"
-                                        f"<span style='font-size:12px;font-weight:700;'>{nom_c} ({stk_c})</span>"
-                                        f"</div>",
-                                        unsafe_allow_html=True
-                                    )
-                                    if st.button(
-                                        "Elegido ✓" if es_sel else f"Color {nom_c}",
-                                        key=f"btn_c_{prod['id']}_{nom_c}",
-                                        use_container_width=True
-                                    ):
-                                        st.session_state[key_color_sel] = nom_c
+                            st.caption(f"{prod.get('categoria') or 'General'} · {tp_prod}")
+                            st.markdown(f"### {subp}")
+                            if prod.get("descripcion"):
+                                st.write(prod["descripcion"])
+                            st.markdown(f"<div class='precio-lista'>{precio:.2f} Bs</div>", unsafe_allow_html=True)
+
+                            if stock_total > 0 and precio > 0:
+                                st.markdown(f"<div class='badge-stock'>Stock disponible: {stock_total} unid.</div>", unsafe_allow_html=True)
+                                st.caption("Colores disponibles en stock:")
+
+                                key_color_sel = f"color_sel_{prod['id']}"
+                                nombres_disp = [c for c, _ in colores_disp]
+                                if key_color_sel not in st.session_state or st.session_state[key_color_sel] not in nombres_disp:
+                                    st.session_state[key_color_sel] = nombres_disp[0]
+
+                                color_actual = st.session_state[key_color_sel]
+
+                                cols_colores = st.columns(min(len(colores_disp), 3))
+                                for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
+                                    hex_c = color_hex(nom_c)
+                                    es_sel = (nom_c == color_actual)
+                                    borde = "3px solid #1565c0" if es_sel else "1px solid #cbd5e1"
+                                    with cols_colores[idx_c % len(cols_colores)]:
+                                        st.markdown(
+                                            f"<div style='display:flex;align-items:center;gap:6px;padding:4px 6px;border:{borde};border-radius:6px;margin-bottom:4px;background:#fff;'>"
+                                            f"<span style='display:inline-block;width:14px;height:14px;border-radius:50%;background:{hex_c};border:1px solid #999;'></span>"
+                                            f"<span style='font-size:12px;font-weight:700;'>{nom_c} ({stk_c})</span>"
+                                            f"</div>",
+                                            unsafe_allow_html=True
+                                        )
+                                        if st.button(
+                                            "Elegido ✓" if es_sel else f"{nom_c}",
+                                            key=f"btn_c_{prod['id']}_{nom_c}",
+                                            use_container_width=True
+                                        ):
+                                            st.session_state[key_color_sel] = nom_c
+                                            st.rerun()
+
+                                stock_color_actual = dict(colores_disp).get(color_actual, 0)
+                                en_carrito_color = st.session_state["carrito"].get((prod["id"], color_actual), 0)
+
+                                if st.button(
+                                    f"🛒 Agregar ({color_actual}) al Carrito",
+                                    key=f"add_cart_{prod['id']}",
+                                    type="primary",
+                                    use_container_width=True
+                                ):
+                                    if en_carrito_color < stock_color_actual:
+                                        st.session_state["carrito"][(prod["id"], color_actual)] = en_carrito_color + 1
+                                        st.toast(f"✅ Agregado: {tp_prod} - {subp} [{color_actual}]")
                                         st.rerun()
-
-                            stock_color_actual = dict(colores_disp).get(color_actual, 0)
-                            en_carrito_color = st.session_state["carrito"].get((prod["id"], color_actual), 0)
-
-                            if st.button(
-                                f"🛒 Agregar ({color_actual}) al Carrito",
-                                key=f"add_cart_{prod['id']}",
-                                type="primary",
-                                use_container_width=True
-                            ):
-                                if en_carrito_color < stock_color_actual:
-                                    st.session_state["carrito"][(prod["id"], color_actual)] = en_carrito_color + 1
-                                    st.toast(f"✅ Agregado: {prod['nombre']} [{color_actual}]")
-                                    st.rerun()
-                                else:
-                                    st.warning(f"⚠️ No hay más unidades en color {color_actual}.")
-                        else:
-                            st.markdown("<div class='badge-agotado'>❌ AGOTADO</div>", unsafe_allow_html=True)
-                            st.button("Sin stock disponible", key=f"no_stk_{prod['id']}", disabled=True, use_container_width=True)
+                                    else:
+                                        st.warning(f"⚠️ No hay más unidades en color {color_actual}.")
+                            else:
+                                st.markdown("<div class='badge-agotado'>❌ AGOTADO</div>", unsafe_allow_html=True)
+                                st.button("Sin stock disponible", key=f"no_stk_{prod['id']}", disabled=True, use_container_width=True)
 
 # ==========================================
 # PESTAÑA 2: CARRITO DE COMPRAS — PEDIDO
@@ -395,7 +476,6 @@ with tab_carrito:
     productos_map = {p["id"]: p for p in cargar_productos(solo_activos=True)}
     carrito = st.session_state["carrito"]
 
-    # Validar ítems del carrito contra stock de color actual
     for clave_item in list(carrito.keys()):
         pid, col_item = clave_item
         if pid not in productos_map:
@@ -406,9 +486,8 @@ with tab_carrito:
             del carrito[clave_item]
 
     if not carrito:
-        st.info("Tu carrito está vacío. Selecciona un producto y su color en la pestaña **🛍️ Catálogo**.")
+        st.info("Tu carrito está vacío. Selecciona un tipo de producto, su modelo y color en la pestaña **🛍️ Catálogo**.")
     else:
-        # Encabezado tipo tabla
         h1, h2, h3, h4 = st.columns([4.5, 1.8, 2.2, 1.8])
         h1.markdown("**Descripción**")
         h2.markdown("**Precio Unitario**")
@@ -432,12 +511,13 @@ with tab_carrito:
             precio_u = float(prod.get("precio") or 0)
             importe = precio_u * cant
             total_productos += importe
+            tp_prod = (prod.get("tipo_producto") or prod.get("nombre") or "General").strip()
             subp = (prod.get("subproducto") or "Estándar").strip()
-            lineas_detalle.append(f"• {cant}x {prod['nombre']} ({subp}) - Color: {col_item} [{precio_u:.2f} Bs] = {importe:.2f} Bs")
+            lineas_detalle.append(f"• {cant}x {tp_prod} - {subp} (Color: {col_item}) [{precio_u:.2f} Bs] = {importe:.2f} Bs")
 
             r1, r2, r3, r4 = st.columns([4.5, 1.8, 2.2, 1.8], vertical_alignment="center")
             with r1:
-                st.markdown(f"**{prod['nombre']}** · *{subp}*")
+                st.markdown(f"**{tp_prod}** · *{subp}*")
                 st.caption(f"Color: **{col_item}** · Stock color: {max_col}")
             with r2:
                 st.write(f"{precio_u:.2f} Bs")
@@ -509,7 +589,7 @@ with tab_carrito:
                             continue
                         col_map = dict(parsear_colores_stock(prod_frescos[pid].get("colores_stock")))
                         if col_map.get(col_item, 0) < cant:
-                            errores_stock.append(f"{prod_frescos[pid]['nombre']} ({col_item})")
+                            errores_stock.append(f"{prod_frescos[pid].get('tipo_producto')} - {prod_frescos[pid].get('subproducto')} ({col_item})")
 
                     if errores_stock:
                         st.error(f"⚠️ Stock insuficiente para: {', '.join(errores_stock)}. Actualiza las cantidades.")
@@ -531,7 +611,6 @@ with tab_carrito:
                             }).execute()
                             pedido_id = resp_ped.data[0]["id"] if resp_ped.data else "NUEVO"
 
-                            # Descontar stock del color específico y actualizar stock total
                             for (pid, col_item), cant in carrito.items():
                                 colores_act = parsear_colores_stock(prod_frescos[pid].get("colores_stock"))
                                 nuevos_colores = []
@@ -601,15 +680,76 @@ with tab_admin:
                 st.session_state["admin_usuario"] = ""
                 st.rerun()
 
-        sub_precios, sub_crear, sub_pedidos = st.tabs([
+        sub_crear, sub_precios, sub_pedidos = st.tabs([
+            "➕ Crear Tipo de Producto y Modelo",
             "💲 Lista de Precios y Colores (Tabla)",
-            "➕ Nuevo Producto / Variante",
             "📦 Pedidos Recibidos"
         ])
 
-        # --- TABLA EDITABLE DE PRECIOS Y STOCK POR COLOR ---
+        # --- CREAR TIPO DE PRODUCTO + SUBPRODUCTO (MODELO) ---
+        with sub_crear:
+            st.write("Crea un **Tipo de Producto** (ej. *Coquet*, *Flor*, *Pompón*, *Scrunchies*, *Mariposas*, *Winchas*, *Pulseras*) y su **Subproducto / Modelo** (ej. *Cola Redonda*, *Cola Larga*, *Grande*, *Mediano*):")
+            todos_existentes = cargar_productos(solo_activos=False)
+            tipos_guardados = sorted(list(set(
+                TIPOS_PRODUCTO_BASE + [
+                    (p.get("tipo_producto") or p.get("nombre") or "").strip()
+                    for p in todos_existentes if (p.get("tipo_producto") or p.get("nombre") or "").strip()
+                ]
+            )))
+
+            with st.form("form_nuevo_tipo_subproducto", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    cat_sel = st.selectbox(
+                        "1. Línea / Temporada",
+                        [
+                            "Accesorios para el Cabello",
+                            "Accesorios para el Hogar (Navidad)",
+                            "Accesorios para el Hogar (Temporada)"
+                        ]
+                    )
+                    cat_nueva = st.text_input("O escribe nueva línea (Opcional)")
+                with c2:
+                    tipo_sel_form = st.selectbox("2. Tipo de Producto (Mosaico) *", tipos_guardados)
+                    tipo_nuevo_form = st.text_input("O crea un Tipo de Producto nuevo (Opcional)", placeholder="Ej. Diademas, Prendedores...")
+                    sub_p = st.text_input("3. Subproducto / Modelo * (Ej. Cola Redonda, Cola Larga, Grande)")
+                with c3:
+                    prec_p = st.number_input("4. Precio de Lista (Bs.) *", min_value=0.0, step=1.0, format="%.2f")
+                    col_stk_p = st.text_input("5. Colores y Stock * (Ej. Rojo:4, Rosa:6, Azul:2)", value="Rojo:5, Rosa:5")
+                    desc_p = st.text_input("Descripción corta (Opcional)")
+
+                foto_p = st.file_uploader("Foto del modelo (Opcional)", type=["jpg", "jpeg", "png", "webp"])
+
+                if st.form_submit_button("💾 Guardar Tipo y Subproducto", type="primary"):
+                    cat_f = cat_nueva.strip() if cat_nueva.strip() else cat_sel
+                    tipo_f = tipo_nuevo_form.strip() if tipo_nuevo_form.strip() else tipo_sel_form
+                    if not tipo_f or not sub_p.strip():
+                        st.warning("⚠️ Completa el Tipo de Producto y el Subproducto/Modelo.")
+                    else:
+                        col_tuplas = parsear_colores_stock(col_stk_p)
+                        stk_tot = sum(s for _, s in col_tuplas)
+                        url_img = subir_imagen_storage(foto_p) if foto_p else ""
+                        try:
+                            supabase.table("productos").insert({
+                                "categoria": cat_f,
+                                "tipo_producto": tipo_f,
+                                "nombre": f"{tipo_f} - {sub_p.strip()}",
+                                "subproducto": sub_p.strip(),
+                                "descripcion": desc_p.strip(),
+                                "precio": float(prec_p),
+                                "colores_stock": serializar_colores_stock(col_tuplas),
+                                "stock": int(stk_tot),
+                                "imagen_url": url_img,
+                                "activo": True
+                            }).execute()
+                            st.success(f"✅ Creado en mosaico **{tipo_f}** → modelo **{sub_p.strip()}**.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al crear producto: {e}")
+
+        # --- TABLA EDITABLE DE LISTA DE PRECIOS Y COLORES ---
         with sub_precios:
-            st.write("Configura y actualiza los precios de lista, colores en stock y visibilidad directamente en la tabla:")
+            st.write("Edita directamente los tipos de producto, modelos, precios de lista, colores en stock o visibilidad:")
             todos_p = cargar_productos(solo_activos=False)
             if not todos_p:
                 st.info("No hay productos registrados todavía.")
@@ -617,9 +757,9 @@ with tab_admin:
                 df_lista = pd.DataFrame([
                     {
                         "id": p["id"],
-                        "Línea": p.get("categoria") or "General",
-                        "Producto": p["nombre"],
-                        "Subproducto": p.get("subproducto") or "Estándar",
+                        "Línea": p.get("categoria") or "Accesorios para el Cabello",
+                        "Tipo Producto (Mosaico)": p.get("tipo_producto") or p.get("nombre") or "General",
+                        "Subproducto / Modelo": p.get("subproducto") or "Estándar",
                         "Precio Lista (Bs.)": float(p.get("precio") or 0),
                         "Colores en Stock (Color:Cant)": p.get("colores_stock") or "Único:0",
                         "Activo": bool(p.get("activo", True))
@@ -652,67 +792,22 @@ with tab_admin:
                         for _, fila in df_editado.iterrows():
                             col_list = parsear_colores_stock(fila["Colores en Stock (Color:Cant)"])
                             stock_sum = sum(s for _, s in col_list)
+                            tp_val = str(fila["Tipo Producto (Mosaico)"]).strip()
+                            sub_val = str(fila["Subproducto / Modelo"]).strip()
                             supabase.table("productos").update({
                                 "categoria": str(fila["Línea"]).strip(),
-                                "nombre": str(fila["Producto"]).strip(),
-                                "subproducto": str(fila["Subproducto"]).strip(),
+                                "tipo_producto": tp_val,
+                                "nombre": f"{tp_val} - {sub_val}",
+                                "subproducto": sub_val,
                                 "precio": float(fila["Precio Lista (Bs.)"]),
                                 "colores_stock": serializar_colores_stock(col_list),
                                 "stock": int(stock_sum),
                                 "activo": bool(fila["Activo"])
                             }).eq("id", int(fila["id"])).execute()
-                        st.success("✅ ¡Lista de precios y stock de colores actualizada en Supabase!")
+                        st.success("✅ ¡Lista de precios, mosaicos y stock actualizados!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al actualizar tabla de precios: {e}")
-
-        # --- CREAR NUEVO PRODUCTO CON COLORES Y FOTO ---
-        with sub_crear:
-            st.write("Registra un nuevo producto o variante con sus colores disponibles y foto:")
-            with st.form("form_nuevo_prod_colores", clear_on_submit=True):
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    cat_sel = st.selectbox(
-                        "Línea / Temporada",
-                        [
-                            "Accesorios para el Cabello",
-                            "Accesorios para el Hogar (Navidad)",
-                            "Accesorios para el Hogar (Temporada)"
-                        ]
-                    )
-                    cat_nueva = st.text_input("O escribe nueva línea (Opcional)")
-                with c2:
-                    nom_p = st.text_input("Producto * (Ej. Scrunchies, Almohadones Navideños)")
-                    sub_p = st.text_input("Subproducto * (Ej. Grande, Cola Redonda)", value="Estándar")
-                with c3:
-                    prec_p = st.number_input("Precio de Lista (Bs.) *", min_value=0.0, step=1.0, format="%.2f")
-                    col_stk_p = st.text_input("Colores y Stock * (Ej. Rojo:4, Rosa:6, Azul:2)", value="Rojo:5, Rosa:5")
-
-                foto_p = st.file_uploader("Foto del producto (Opcional)", type=["jpg", "jpeg", "png", "webp"])
-
-                if st.form_submit_button("➕ Guardar Producto"):
-                    cat_f = cat_nueva.strip() if cat_nueva.strip() else cat_sel
-                    if not nom_p.strip() or not sub_p.strip():
-                        st.warning("⚠️ Completa el nombre del producto y del subproducto.")
-                    else:
-                        col_tuplas = parsear_colores_stock(col_stk_p)
-                        stk_tot = sum(s for _, s in col_tuplas)
-                        url_img = subir_imagen_storage(foto_p) if foto_p else ""
-                        try:
-                            supabase.table("productos").insert({
-                                "categoria": cat_f,
-                                "nombre": nom_p.strip(),
-                                "subproducto": sub_p.strip(),
-                                "precio": float(prec_p),
-                                "colores_stock": serializar_colores_stock(col_tuplas),
-                                "stock": int(stk_tot),
-                                "imagen_url": url_img,
-                                "activo": True
-                            }).execute()
-                            st.success(f"✅ Producto '{nom_p.strip()} - {sub_p.strip()}' guardado.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al crear producto: {e}")
+                        st.error(f"Error al actualizar tabla: {e}")
 
         # --- PEDIDOS RECIBIDOS ---
         with sub_pedidos:
