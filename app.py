@@ -337,10 +337,13 @@ def inicializar_estado_sesion():
     """
     Cabecera:
     Inicializa en st.session_state las variables necesarias para el carrito,
-    navegación por línea y tipo de producto, sesión del administrador y enlace de WhatsApp.
+    vista principal persistente (CATÁLOGO, CARRITO, ADMINISTRACIÓN), navegación
+    por línea y tipo de producto, sesión del administrador y enlace de WhatsApp.
     - Parámetros: ninguno.
     - Retorna: None.
     """
+    if "vista_principal" not in st.session_state:
+        st.session_state["vista_principal"] = "CATALOGO"  # Mantiene la sección activa tras st.rerun()
     if "carrito" not in st.session_state:
         st.session_state["carrito"] = {}  # Estructura: {(id_producto, color): cantidad}
     if "linea_activa" not in st.session_state:
@@ -858,7 +861,6 @@ def render_catalogo(productos):
                     cols_colores = st.columns(min(len(colores_disp), 2))
                     for idx_c, (nom_c, stk_c) in enumerate(colores_disp):
                         es_sel = (nom_c == color_actual)
-                        muestra_html = render_muestra_color_html(nom_c)
                         key_btn_col = f"btn_c_{prod['id']}_{nom_c}"
                         with cols_colores[idx_c % len(cols_colores)]:
                             if st.button(
@@ -950,6 +952,7 @@ def render_carrito(productos):
         st.write("")
         if st.button("🛍️ SEGUIR COMPRANDO"):
             st.session_state["ultimo_pedido_wp"] = None
+            st.session_state["vista_principal"] = "CATALOGO"
             st.rerun()
         st.divider()
 
@@ -967,7 +970,7 @@ def render_carrito(productos):
             del carrito[clave_item]
 
     if not carrito:
-        st.info("TU CARRITO ESTÁ VACÍO. SELECCIONA UN TIPO DE PRODUCTO, SU MODELO Y COLOR EN LA PESTAÑA **🛍️ CATÁLOGO**.")
+        st.info("TU CARRITO ESTÁ VACÍO. SELECCIONA UN TIPO DE PRODUCTO, SU MODELO Y COLOR EN **🛍️ CATÁLOGO**.")
         return
 
     # Encabezados de la tabla del carrito
@@ -1012,6 +1015,7 @@ def render_carrito(productos):
             c_men, c_num, c_mas = st.columns([1, 1, 1], vertical_alignment="center")
             with c_men:
                 if st.button("➖", key=f"dec_{pid}_{col_item}"):
+                    st.session_state["vista_principal"] = "CARRITO"  # Mantiene la vista en el carrito
                     if cant > 1:
                         carrito[clave_item] = cant - 1  # Decrementa cantidad en 1
                     else:
@@ -1021,6 +1025,7 @@ def render_carrito(productos):
                 st.markdown(f"<div style='text-align:center;font-weight:700;'>{cant}</div>", unsafe_allow_html=True)
             with c_mas:
                 if st.button("➕", key=f"inc_{pid}_{col_item}"):
+                    st.session_state["vista_principal"] = "CARRITO"  # Mantiene la vista en el carrito
                     if cant < max_col:
                         carrito[clave_item] = cant + 1  # Incrementa cantidad si hay stock
                         st.rerun()
@@ -1061,9 +1066,11 @@ def render_carrito(productos):
 
         if limpiar_btn:
             st.session_state["carrito"] = {}  # Vacía todo el carrito
+            st.session_state["vista_principal"] = "CARRITO"
             st.rerun()
 
         if confirmar_btn:
+            st.session_state["vista_principal"] = "CARRITO"
             if not cliente_nombre.strip() or not cliente_telefono.strip() or not ubicacion_envio.strip():
                 st.warning("⚠️ COMPLETA TU NOMBRE COMPLETO, TELÉFONO/WHATSAPP Y UBICACIÓN PARA EL ENVÍO.")
                 return
@@ -1142,6 +1149,7 @@ def render_login_admin():
                 if r.data:
                     st.session_state["admin_autenticado"] = True
                     st.session_state["admin_usuario"] = u_in
+                    st.session_state["vista_principal"] = "ADMIN"
                     st.rerun()
                 else:
                     st.error("USUARIO O CONTRASEÑA INCORRECTOS.")
@@ -1517,7 +1525,7 @@ def main():
     """
     Cabecera:
     Función principal que orquesta la inicialización de la página, estado de sesión,
-    encabezado superior y pestañas principales de MIMUNDOMICASA.
+    encabezado superior y navegación persistente entre CATÁLOGO, CARRITO y ADMINISTRACIÓN.
     - Parámetros: ninguno.
     - Retorna: None.
     """
@@ -1534,22 +1542,46 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
-    tab_catalogo, tab_carrito, tab_admin = st.tabs([
-        "🛍️ CATÁLOGO",
-        etiqueta_carrito,
-        "🔐 ADMINISTRACIÓN"
-    ])
+    # Barra de navegación persistente para que botones como ➕ y ➖ no devuelvan al catálogo
+    col_nav1, col_nav2, col_nav3 = st.columns(3)
+    with col_nav1:
+        if st.button(
+            "🛍️ CATÁLOGO",
+            key="nav_btn_catalogo",
+            type="primary" if st.session_state["vista_principal"] == "CATALOGO" else "secondary",
+            use_container_width=True
+        ):
+            st.session_state["vista_principal"] = "CATALOGO"
+            st.rerun()
+    with col_nav2:
+        if st.button(
+            etiqueta_carrito,
+            key="nav_btn_carrito",
+            type="primary" if st.session_state["vista_principal"] == "CARRITO" else "secondary",
+            use_container_width=True
+        ):
+            st.session_state["vista_principal"] = "CARRITO"
+            st.rerun()
+    with col_nav3:
+        if st.button(
+            "🔐 ADMINISTRACIÓN",
+            key="nav_btn_admin",
+            type="primary" if st.session_state["vista_principal"] == "ADMIN" else "secondary",
+            use_container_width=True
+        ):
+            st.session_state["vista_principal"] = "ADMIN"
+            st.rerun()
+
+    st.divider()
 
     productos_activos = cargar_productos(solo_activos=True)
 
-    with tab_catalogo:
-        render_catalogo(productos_activos)
-
-    with tab_carrito:
+    if st.session_state["vista_principal"] == "CARRITO":
         render_carrito(productos_activos)
-
-    with tab_admin:
+    elif st.session_state["vista_principal"] == "ADMIN":
         render_admin()
+    else:
+        render_catalogo(productos_activos)
 
 
 if __name__ == "__main__":
